@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3a5f">
+<title>Stock Shop Paliseul</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bleu:#1f3a5f;--bleu2:#2c5282;--rouge:#c8102e;--vert:#2e7d32;--orange:#d9822b;--fond:#f3f5f8;--carte:#fff;--texte:#1d2430;--gris:#6b7480;--bord:#d9dee5}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--fond);color:var(--texte);font-size:16px;line-height:1.4}
+button,input,select{font:inherit}
+.cache{display:none!important}
+
+/* En-tête */
+#entete{position:sticky;top:0;z-index:10}
+.barre{background:var(--bleu);color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px}
+.barre h1{font-size:17px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.barre .version{font-size:11px;opacity:.7;font-weight:normal}
+.etat{font-size:12px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.pastille{width:9px;height:9px;border-radius:50%;background:#7bd389;flex:none}
+.pastille.horsligne{background:#ff8a65}
+nav{display:flex;background:#fff;border-bottom:1px solid var(--bord)}
+nav button{flex:1;border:0;background:none;padding:11px 4px;color:var(--gris);font-weight:600;border-bottom:3px solid transparent;cursor:pointer}
+nav button.actif{color:var(--bleu);border-bottom-color:var(--bleu)}
+
+main{max-width:760px;margin:0 auto;padding:14px}
+.carte{background:var(--carte);border:1px solid var(--bord);border-radius:12px;padding:14px;margin-bottom:14px}
+.carte h2{font-size:16px;margin:0 0 10px}
+.aide{font-size:13px;color:var(--gris);margin:6px 0 0}
+
+.btn{border:0;border-radius:10px;padding:11px 16px;background:var(--bleu);color:#fff;font-weight:600;cursor:pointer}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.second{background:#e8edf3;color:var(--bleu)}
+.btn.danger{background:var(--rouge)}
+.btn.plein{width:100%}
+.ligne{display:flex;gap:8px;align-items:center}
+.ligne > input{flex:1;min-width:0}
+
+input[type=text],input[type=email],input[type=password],input[type=number],input[type=search],select{width:100%;padding:10px 12px;border:1px solid var(--bord);border-radius:10px;background:#fff;color:var(--texte)}
+input:focus,select:focus{outline:2px solid var(--bleu2);outline-offset:0;border-color:var(--bleu2)}
+label{display:block;font-size:13px;font-weight:600;color:var(--gris);margin:10px 0 4px}
+
+/* Connexion */
+#ecranConnexion{max-width:380px;margin:40px auto;padding:0 14px}
+#ecranConnexion .logo{text-align:center;margin-bottom:16px}
+#ecranConnexion .logo img{width:72px;height:72px;border-radius:16px}
+.erreur{color:var(--rouge);font-size:14px;margin-top:8px;min-height:1em}
+.lien{background:none;border:0;color:var(--bleu2);text-decoration:underline;padding:0;margin-top:12px;cursor:pointer;font-size:14px}
+
+/* Scanner */
+#zoneVideo{position:relative;background:#000;border-radius:10px;overflow:hidden;margin-top:10px;aspect-ratio:4/3}
+#video{width:100%;height:100%;object-fit:cover;display:block}
+#zoneVideo .viseur{position:absolute;left:10%;right:10%;top:38%;height:24%;border:2px solid rgba(255,255,255,.85);border-radius:8px;box-shadow:0 0 0 2000px rgba(0,0,0,.25)}
+.resultat{border-radius:10px;padding:12px;margin-top:10px;font-size:15px}
+.resultat.ok{background:#e8f5e9;border:1px solid #b9dfbc}
+.resultat.ko{background:#fdecea;border:1px solid #f5c2bc}
+.resultat.info{background:#eef3fa;border:1px solid #cbd9ec}
+
+/* Liste catalogue */
+.puces{display:flex;gap:6px;overflow-x:auto;padding:8px 0 2px;scrollbar-width:none}
+.puce{border:1px solid var(--bord);background:#fff;border-radius:20px;padding:6px 12px;font-size:13px;white-space:nowrap;cursor:pointer;color:var(--texte)}
+.puce.actif{background:var(--bleu);color:#fff;border-color:var(--bleu)}
+.compteur{font-size:13px;color:var(--gris);margin:8px 0}
+.liste{list-style:none;margin:0;padding:0}
+.liste li{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid #edf0f3;cursor:pointer}
+.liste li:last-child{border-bottom:0}
+.liste .desc{flex:1;min-width:0}
+.liste .nom{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.liste .sous{font-size:12px;color:var(--gris)}
+.liste .prix{font-weight:600;white-space:nowrap}
+.badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:#e8edf3;color:var(--bleu);margin-left:4px}
+.badge.orange{background:#fdf0e1;color:#9a5a12}
+
+/* Fenêtre fiche */
+#fond{position:fixed;inset:0;background:rgba(15,25,40,.5);z-index:50;display:flex;align-items:flex-end;justify-content:center}
+#fenetre{background:#fff;width:100%;max-width:560px;max-height:92vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+@media(min-width:600px){#fond{align-items:center}#fenetre{border-radius:16px}}
+#fenetre h2{margin:0 0 4px;font-size:18px}
+.meta{font-size:12px;color:var(--gris);margin-top:10px}
+.deux{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.alerte{background:#fdf0e1;border:1px solid #f2d2a9;border-radius:10px;padding:10px;font-size:14px;margin-top:10px}
+.alerte ul{margin:6px 0 0;padding-left:18px}
+.actions{display:flex;gap:8px;margin-top:16px}
+.actions .btn{flex:1}
+
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1d2430;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:100;max-width:90vw;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.visible{opacity:1}
+#toast.ko{background:var(--rouge)}
+#toast.warn{background:var(--orange)}
+.attente li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #edf0f3}
+.attente li span{flex:1;font-family:ui-monospace,monospace}
+pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius:8px;padding:10px;margin:10px 0 0;max-height:240px;overflow:auto}
+</style>
+</head>
+<body>
+
+<!-- Configuration manquante -->
+<div id="ecranConfig" class="cache">
+  <main><div class="carte">
+    <h2>Configuration Firebase manquante</h2>
+    <p>Collez la configuration de votre projet Firebase dans <b>FIREBASE_CONFIG</b> et les adresses email de Morgane et Martine dans <b>UTILISATEURS</b>, en haut du script de <code>index.html</code>.</p>
+  </div></main>
+</div>
+
+<!-- Connexion -->
+<div id="ecranConnexion" class="cache">
+  <div class="logo"><img src="icon-192.png" alt=""><h1 style="font-size:20px;margin:10px 0 0">Stock Shop Paliseul</h1></div>
+  <div class="carte">
+    <label for="cEmail">Email</label>
+    <input type="email" id="cEmail" autocomplete="username">
+    <label for="cMdp">Mot de passe</label>
+    <input type="password" id="cMdp" autocomplete="current-password">
+    <div class="erreur" id="cErreur"></div>
+    <button class="btn plein" id="cBouton" style="margin-top:8px">Se connecter</button>
+    <button class="lien" id="cOubli">Mot de passe oublié ?</button>
+  </div>
+</div>
+
+<!-- Application -->
+<div id="ecranAppli" class="cache">
+  <div id="entete">
+    <div class="barre">
+      <h1>Stock Shop <span class="version" id="vVersion"></span></h1>
+      <div class="etat"><span class="pastille" id="pastille"></span><span id="etatTexte">En ligne</span></div>
+    </div>
+    <nav>
+      <button data-onglet="scanner" class="actif">Scanner</button>
+      <button data-onglet="catalogue">Catalogue</button>
+      <button data-onglet="outils">Outils</button>
+    </nav>
+  </div>
+
+  <main>
+    <!-- Onglet Scanner -->
+    <section id="ongletScanner">
+      <div class="carte">
+        <h2>Scanner un produit</h2>
+        <button class="btn plein" id="sCamera">📷 Ouvrir la caméra</button>
+        <div id="zoneVideo" class="cache"><video id="video" playsinline muted></video><div class="viseur"></div></div>
+        <label for="sSaisie">Ou saisir / douchette</label>
+        <div class="ligne">
+          <input type="text" id="sSaisie" inputmode="numeric" autocomplete="off" placeholder="Code-barres puis Entrée">
+          <button class="btn" id="sOk">OK</button>
+        </div>
+        <div id="sResultat"></div>
+        <button class="btn second plein" id="sSansCode" style="margin-top:12px">Produit sans code-barres</button>
+      </div>
+      <div class="carte cache" id="carteAttente">
+        <h2>Codes à créer (scannés hors ligne)</h2>
+        <ul class="liste attente" id="listeAttente"></ul>
+      </div>
+    </section>
+
+    <!-- Onglet Catalogue -->
+    <section id="ongletCatalogue" class="cache">
+      <div class="carte">
+        <input type="search" id="kRecherche" placeholder="Rechercher un nom ou un code…">
+        <div class="puces" id="kPuces"></div>
+        <div class="compteur" id="kCompteur"></div>
+        <ul class="liste" id="kListe"></ul>
+      </div>
+    </section>
+
+    <!-- Onglet Outils -->
+    <section id="ongletOutils" class="cache">
+      <div class="carte">
+        <h2>Importer un catalogue (CSV)</h2>
+        <p class="aide">Fichier séparé par des points-virgules avec au moins les colonnes <b>plu</b> et <b>description</b>. Les produits déjà présents ne sont jamais écrasés.</p>
+        <input type="file" id="oFichier" accept=".csv,text/csv" style="margin-top:10px">
+        <button class="btn plein" id="oImporter" style="margin-top:10px">Importer</button>
+        <pre class="rapport cache" id="oRapport"></pre>
+      </div>
+      <div class="carte">
+        <h2>Exporter le catalogue</h2>
+        <button class="btn second plein" id="oExporter">Télécharger le catalogue (CSV)</button>
+      </div>
+      <div class="carte">
+        <h2>Compte</h2>
+        <p style="margin:0">Connectée : <b id="oUtilisateur"></b></p>
+        <p class="aide" id="oInfo"></p>
+        <button class="btn danger plein" id="oDeconnexion" style="margin-top:12px">Se déconnecter</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Fenêtre fiche produit -->
+<div id="fond" class="cache"><div id="fenetre"></div></div>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+'use strict';
+
+// ============================================================
+//  CONFIGURATION — à compléter
+// ============================================================
+const VERSION = 'v0.1.1';
+
+// Coller ici la configuration du projet Firebase (console > Paramètres du projet > Vos applications)
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyC4-nO3HQrc4bPY4aoy419VBIbl7x8BAO0',
+  authDomain: 'stock-shop-paliseul.firebaseapp.com',
+  projectId: 'stock-shop-paliseul',
+  storageBucket: 'stock-shop-paliseul.firebasestorage.app',
+  messagingSenderId: '270652500565',
+  appId: '1:270652500565:web:04314100379d6a0f7f02dc'
+};
+
+// Adresses email autorisées (en minuscules) → prénom affiché
+// Les mêmes adresses doivent figurer dans les règles Firestore.
+const UTILISATEURS = {
+  'esso.rolus@skynet.be': 'Morgane',
+  'martrol0205@gmail.com': 'Martine'
+};
+
+// Catégories = codes rapport FuelPOS
+const CATEGORIES = {
+  '3006': { nom: 'Alimentation / snacks', court: 'Alim.', tva: 6 },
+  '7119': { nom: 'Boissons sans alcool', court: 'Boissons', tva: 6 },
+  '6019': { nom: 'Droguerie / divers', court: 'Droguerie', tva: 21 },
+  '7019': { nom: 'Bières, vins, alcools', court: 'Alcools', tva: 21 },
+  '0000': { nom: 'Autre', court: 'Autre', tva: 21 }
+};
+
+// ============================================================
+//  ÉTAT
+// ============================================================
+let db = null, auth = null;
+let utilisateur = null;          // prénom
+const catalogue = new Map();     // code -> fiche
+let desabonnerCatalogue = null;
+let ecritureEnAttente = false;
+let filtreCategorie = 'tous';
+const CLE_ATTENTE = 'stockshop_attente';
+
+const $ = id => document.getElementById(id);
+
+// ============================================================
+//  OUTILS
+// ============================================================
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function euro(v) {
+  return (v == null || isNaN(v)) ? '—' : v.toFixed(2).replace('.', ',') + ' €';
+}
+function lireNombre(s) {
+  if (s == null) return null;
+  s = String(s).trim().replace(',', '.').replace(/[^\d.\-]/g, '');
+  if (s === '') return null;
+  const v = parseFloat(s);
+  return isNaN(v) ? null : v;
+}
+function dateTexte(ts) {
+  if (!ts || !ts.toDate) return '';
+  return ts.toDate().toLocaleString('fr-BE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function normaliserTexte(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[.']/g, '');
+}
+let minuteurToast = null;
+function toast(msg, type) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'visible' + (type ? ' ' + type : '');
+  clearTimeout(minuteurToast);
+  minuteurToast = setTimeout(() => { t.className = ''; }, 3500);
+}
+
+// ============================================================
+//  CODES-BARRES
+// ============================================================
+// Chiffre de contrôle GS1 (EAN-8, EAN-13, GTIN-14) calculé sur le corps du code
+function chiffreControle(corps) {
+  let s = 0;
+  for (let i = corps.length - 1, pos = 0; i >= 0; i--, pos++) {
+    s += Number(corps[i]) * (pos % 2 === 0 ? 3 : 1);
+  }
+  return String((10 - (s % 10)) % 10);
+}
+function controleValide(code) {
+  return chiffreControle(code.slice(0, -1)) === code.slice(-1);
+}
+// Met tous les codes au même format pour qu'un même produit ait toujours la même fiche :
+// - UPC-A 12 chiffres -> EAN-13 avec un 0 devant
+// - GTIN-14 commençant par 0 -> EAN-13
+// - codes internes courts (≤ 7 chiffres, ex. caisse Jupiler 753951) acceptés tels quels
+function normaliserCode(brut) {
+  let c = String(brut || '').replace(/\D/g, '');
+  if (!c) return { ok: false, raison: 'Code vide' };
+  if (c.length <= 7) return { ok: true, code: c, interne: true };
+  if (c.length === 12) c = '0' + c;
+  if (c.length === 14 && c[0] === '0') c = c.slice(1);
+  if (c.length !== 8 && c.length !== 13 && c.length !== 14) {
+    return { ok: false, raison: 'Longueur inattendue (' + c.length + ' chiffres)' };
+  }
+  if (!controleValide(c)) return { ok: false, raison: 'Chiffre de contrôle incorrect : code mal lu' };
+  return { ok: true, code: c, interne: false };
+}
+
+// ============================================================
+//  DÉMARRAGE
+// ============================================================
+function demarrer() {
+  $('vVersion').textContent = VERSION;
+  if (FIREBASE_CONFIG.apiKey === 'A_REMPLACER') {
+    $('ecranConfig').classList.remove('cache');
+    return;
+  }
+  firebase.initializeApp(FIREBASE_CONFIG);
+  auth = firebase.auth();
+  db = firebase.firestore();
+  // Données gardées dans le téléphone : l'appli fonctionne en réserve sans réseau
+  db.enablePersistence({ synchronizeTabs: true }).catch(e => console.warn('Persistance hors ligne indisponible', e.code));
+
+  auth.onAuthStateChanged(u => {
+    if (u) {
+      const nom = UTILISATEURS[(u.email || '').toLowerCase()];
+      if (!nom) {
+        auth.signOut();
+        afficherConnexion('Ce compte n\'est pas autorisé.');
+        return;
+      }
+      utilisateur = nom;
+      afficherAppli();
+    } else {
+      utilisateur = null;
+      if (desabonnerCatalogue) { desabonnerCatalogue(); desabonnerCatalogue = null; }
+      afficherConnexion('');
+    }
+  });
+
+  window.addEventListener('online', () => {
+    majEtat();
+    const n = lireAttente().length;
+    if (n) toast('Connexion revenue : ' + n + ' code(s) à créer');
+  });
+  window.addEventListener('offline', majEtat);
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW', e));
+  }
+}
+
+function afficherConnexion(msg) {
+  arreterCamera();
+  $('ecranAppli').classList.add('cache');
+  $('ecranConnexion').classList.remove('cache');
+  $('cErreur').textContent = msg || '';
+}
+
+function afficherAppli() {
+  $('ecranConnexion').classList.add('cache');
+  $('ecranAppli').classList.remove('cache');
+  $('oUtilisateur').textContent = utilisateur;
+  $('oInfo').textContent = 'Version ' + VERSION;
+  majEtat();
+  renderPuces();
+  renderAttente();
+  ecouterCatalogue();
+}
+
+function majEtat() {
+  const enLigne = navigator.onLine;
+  $('pastille').classList.toggle('horsligne', !enLigne);
+  $('etatTexte').textContent = (enLigne ? 'En ligne' : 'Hors ligne') + (ecritureEnAttente ? ' · synchro…' : '');
+}
+
+// Catalogue en temps réel, partagé entre tous les téléphones
+function ecouterCatalogue() {
+  if (desabonnerCatalogue) desabonnerCatalogue();
+  desabonnerCatalogue = db.collection('produits').onSnapshot({ includeMetadataChanges: true }, snap => {
+    catalogue.clear();
+    snap.forEach(d => catalogue.set(d.id, d.data()));
+    ecritureEnAttente = snap.metadata.hasPendingWrites;
+    majEtat();
+    renderCatalogue();
+  }, err => {
+    console.error(err);
+    toast('Accès au catalogue refusé : ' + err.code, 'ko');
+  });
+}
+
+// ============================================================
+//  CONNEXION
+// ============================================================
+$('cBouton').addEventListener('click', async () => {
+  const email = $('cEmail').value.trim().toLowerCase();
+  const mdp = $('cMdp').value;
+  $('cErreur').textContent = '';
+  if (!email || !mdp) { $('cErreur').textContent = 'Email et mot de passe requis.'; return; }
+  $('cBouton').disabled = true;
+  try {
+    await auth.signInWithEmailAndPassword(email, mdp);
+  } catch (e) {
+    const msgs = {
+      'auth/invalid-credential': 'Email ou mot de passe incorrect.',
+      'auth/wrong-password': 'Email ou mot de passe incorrect.',
+      'auth/user-not-found': 'Email ou mot de passe incorrect.',
+      'auth/invalid-email': 'Adresse email invalide.',
+      'auth/too-many-requests': 'Trop d\'essais. Réessayez dans quelques minutes.',
+      'auth/network-request-failed': 'Pas de connexion internet.'
+    };
+    $('cErreur').textContent = msgs[e.code] || ('Erreur : ' + e.code);
+  } finally {
+    $('cBouton').disabled = false;
+  }
+});
+$('cMdp').addEventListener('keydown', e => { if (e.key === 'Enter') $('cBouton').click(); });
+$('cOubli').addEventListener('click', async () => {
+  const email = $('cEmail').value.trim().toLowerCase();
+  if (!email) { $('cErreur').textContent = 'Indiquez d\'abord votre email.'; return; }
+  try {
+    await auth.sendPasswordResetEmail(email);
+    $('cErreur').textContent = 'Un email de réinitialisation a été envoyé.';
+  } catch (e) {
+    $('cErreur').textContent = 'Envoi impossible : ' + e.code;
+  }
+});
+
+// ============================================================
+//  ONGLETS
+// ============================================================
+document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('actif', x === b));
+  const o = b.dataset.onglet;
+  $('ongletScanner').classList.toggle('cache', o !== 'scanner');
+  $('ongletCatalogue').classList.toggle('cache', o !== 'catalogue');
+  $('ongletOutils').classList.toggle('cache', o !== 'outils');
+  if (o !== 'scanner') arreterCamera();
+  window.scrollTo(0, 0);
+}));
+
+// ============================================================
+//  SCANNER
+// ============================================================
+let flux = null, detecteur = null, boucle = null, analyseEnCours = false, dernierLu = null, compteLu = 0;
+
+$('sCamera').addEventListener('click', () => { flux ? arreterCamera() : demarrerCamera(); });
+
+async function demarrerCamera() {
+  if (!('BarcodeDetector' in window)) {
+    toast('Lecture par caméra indisponible sur cet appareil : utilisez la saisie.', 'warn');
+    return;
+  }
+  try {
+    detecteur = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+    flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    const v = $('video');
+    v.srcObject = flux;
+    await v.play();
+    $('zoneVideo').classList.remove('cache');
+    $('sCamera').textContent = '✕ Fermer la caméra';
+    dernierLu = null; compteLu = 0;
+    boucle = setInterval(analyserImage, 200);
+  } catch (e) {
+    console.error(e);
+    arreterCamera();
+    toast('Caméra inaccessible : autorisez-la dans le navigateur.', 'ko');
+  }
+}
+
+async function analyserImage() {
+  if (analyseEnCours || !detecteur) return;
+  analyseEnCours = true;
+  try {
+    const codes = await detecteur.detect($('video'));
+    if (codes.length) {
+      const v = codes[0].rawValue;
+      // Le même code doit être lu deux fois de suite : évite les fausses lectures
+      if (v === dernierLu) compteLu++; else { dernierLu = v; compteLu = 1; }
+      if (compteLu >= 2) {
+        arreterCamera();
+        if (navigator.vibrate) navigator.vibrate(80);
+        traiterCode(v);
+      }
+    }
+  } catch (e) { /* image pas encore prête */ }
+  finally { analyseEnCours = false; }
+}
+
+function arreterCamera() {
+  clearInterval(boucle); boucle = null;
+  if (flux) flux.getTracks().forEach(t => t.stop());
+  flux = null;
+  const v = $('video');
+  if (v) v.srcObject = null;
+  $('zoneVideo').classList.add('cache');
+  $('sCamera').textContent = '📷 Ouvrir la caméra';
+}
+
+$('sOk').addEventListener('click', () => {
+  const v = $('sSaisie').value;
+  $('sSaisie').value = '';
+  if (v.trim()) traiterCode(v);
+});
+$('sSaisie').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('sOk').click(); } });
+
+function afficherResultat(html, type) {
+  $('sResultat').innerHTML = '<div class="resultat ' + type + '">' + html + '</div>';
+}
+
+function traiterCode(brut) {
+  const n = normaliserCode(brut);
+  if (!n.ok) {
+    afficherResultat('<b>' + esc(brut) + '</b><br>' + esc(n.raison) + '. Rescannez le produit.', 'ko');
+    if (navigator.vibrate) navigator.vibrate([60, 60, 60]);
+    return;
+  }
+  const fiche = catalogue.get(n.code);
+  if (fiche) {
+    afficherResultat('✓ <b>' + esc(fiche.description) + '</b><br><span class="aide">' + esc(n.code) + ' · ' + euro(fiche.prixVenteTTC) + '</span>', 'ok');
+    ouvrirFiche('modif', fiche);
+    return;
+  }
+  if (!navigator.onLine) {
+    ajouterAttente(n.code);
+    afficherResultat('Produit inconnu <b>' + esc(n.code) + '</b>.<br>Hors ligne : mis dans la liste « Codes à créer ».', 'info');
+    return;
+  }
+  afficherResultat('Nouveau produit <b>' + esc(n.code) + '</b>', 'info');
+  ouvrirFiche('nouveau', { code: n.code });
+}
+
+$('sSansCode').addEventListener('click', () => {
+  if (!navigator.onLine) { toast('La création d\'un produit demande une connexion.', 'warn'); return; }
+  ouvrirFiche('nouveau', { code: null });
+});
+
+// --- Codes scannés hors ligne ---
+function lireAttente() {
+  try { return JSON.parse(localStorage.getItem(CLE_ATTENTE)) || []; } catch (e) { return []; }
+}
+function ecrireAttente(l) {
+  try { localStorage.setItem(CLE_ATTENTE, JSON.stringify(l)); } catch (e) { /* stockage indisponible */ }
+  renderAttente();
+}
+function ajouterAttente(code) {
+  const l = lireAttente();
+  if (!l.includes(code)) { l.push(code); ecrireAttente(l); }
+}
+function retirerAttente(code) {
+  ecrireAttente(lireAttente().filter(c => c !== code));
+}
+function renderAttente() {
+  // Un code créé entre-temps par l'autre téléphone disparaît de la liste
+  const l = lireAttente().filter(c => !catalogue.has(c));
+  $('carteAttente').classList.toggle('cache', l.length === 0);
+  $('listeAttente').innerHTML = l.map(c =>
+    '<li><span>' + esc(c) + '</span><button class="btn" data-creer="' + esc(c) + '">Créer</button>' +
+    '<button class="btn second" data-oublier="' + esc(c) + '">✕</button></li>').join('');
+}
+$('listeAttente').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.oublier) { retirerAttente(b.dataset.oublier); return; }
+  const code = b.dataset.creer;
+  if (catalogue.has(code)) { retirerAttente(code); ouvrirFiche('modif', catalogue.get(code)); return; }
+  if (!navigator.onLine) { toast('Toujours hors ligne.', 'warn'); return; }
+  ouvrirFiche('nouveau', { code });
+});
+
+// ============================================================
+//  OPEN FOOD FACTS (pré-remplissage)
+// ============================================================
+async function chercherOFF(code) {
+  if (!code || code.length < 8) return null;
+  const ctrl = new AbortController();
+  const minuteur = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const r = await fetch('https://world.openfoodfacts.org/api/v2/product/' + code + '.json?fields=product_name_fr,product_name,brands,quantity', { signal: ctrl.signal });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j.status !== 1 || !j.product) return null;
+    const p = j.product;
+    const nom = (p.product_name_fr || p.product_name || '').trim();
+    if (!nom) return null;
+    const marque = (p.brands || '').split(',')[0].trim();
+    const qt = (p.quantity || '').trim();
+    const avecMarque = marque && !normaliserTexte(nom).includes(normaliserTexte(marque)) ? marque + ' ' : '';
+    return (avecMarque + nom + (qt ? ' ' + qt : '')).slice(0, 40);
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(minuteur);
+  }
+}
+
+// ============================================================
+//  PRODUITS SEMBLABLES (évite « Sac PMC » et « Sacs P.M.C Bleu » en double)
+// ============================================================
+function motsCles(s) {
+  return normaliserTexte(s).split(/[^a-z0-9]+/).filter(w => w.length >= 3).map(w => w.replace(/s$/, ''));
+}
+function produitsSemblables(desc, codeExclu) {
+  const a = new Set(motsCles(desc));
+  if (!a.size) return [];
+  const res = [];
+  for (const [code, p] of catalogue) {
+    if (code === codeExclu) continue;
+    const b = new Set(motsCles(p.description));
+    if (!b.size) continue;
+    let communs = 0;
+    a.forEach(m => { if (b.has(m)) communs++; });
+    const score = communs / Math.max(a.size, b.size);
+    if (score >= 0.5) res.push({ score, p });
+  }
+  return res.sort((x, y) => y.score - x.score).slice(0, 3).map(x => x.p);
+}
+
+// ============================================================
+//  FICHE PRODUIT
+// ============================================================
+let ficheCourante = null; // { mode, code }
+
+function optionsCategories(choisi) {
+  return Object.entries(CATEGORIES).map(([c, v]) =>
+    '<option value="' + c + '"' + (c === choisi ? ' selected' : '') + '>' + esc(v.nom) + '</option>').join('');
+}
+function optionsTva(choisi) {
+  return [6, 12, 21, 0].map(t => '<option value="' + t + '"' + (t === choisi ? ' selected' : '') + '>' + t + ' %</option>').join('');
+}
+
+async function ouvrirFiche(mode, p) {
+  arreterCamera();
+  ficheCourante = { mode, code: p.code || null };
+  const cat = p.codeRapport && CATEGORIES[p.codeRapport] ? p.codeRapport : '3006';
+  const tva = p.tvaPct != null ? p.tvaPct : CATEGORIES[cat].tva;
+  const titre = mode === 'nouveau' ? 'Nouveau produit' : 'Fiche produit';
+  let meta = '';
+  if (mode === 'modif') {
+    meta = 'Créé par ' + esc(p.creePar || '?') + (p.creeLe ? ' le ' + dateTexte(p.creeLe) : '') +
+      (p.source ? ' · source : ' + esc(p.source) : '');
+    if (p.modifiePar && p.modifieLe && p.modifieLe !== p.creeLe) meta += '<br>Modifié par ' + esc(p.modifiePar) + ' le ' + dateTexte(p.modifieLe);
+    if (p.stockFuelpos != null) meta += '<br>Stock FuelPOS lors de l\'import : ' + p.stockFuelpos;
+  }
+
+  $('fenetre').innerHTML =
+    '<h2>' + titre + '</h2>' +
+    '<div class="aide">' + (ficheCourante.code ? 'Code : <b>' + esc(ficheCourante.code) + '</b>' : 'Un code interne sera attribué automatiquement') + '</div>' +
+    '<div id="fInfoOFF" class="aide"></div>' +
+    '<label for="fDesc">Désignation *</label>' +
+    '<input type="text" id="fDesc" maxlength="40" value="' + esc(p.description || '') + '">' +
+    '<div id="fSemblables"></div>' +
+    '<label for="fCat">Catégorie</label>' +
+    '<select id="fCat">' + optionsCategories(cat) + '</select>' +
+    '<div class="deux">' +
+      '<div><label for="fPrix">Prix de vente TTC</label><input type="text" id="fPrix" inputmode="decimal" value="' + (p.prixVenteTTC != null ? String(p.prixVenteTTC).replace('.', ',') : '') + '"></div>' +
+      '<div><label for="fTva">TVA</label><select id="fTva">' + optionsTva(tva) + '</select></div>' +
+    '</div>' +
+    '<label for="fConsigne">Consigne (€)</label>' +
+    '<input type="text" id="fConsigne" inputmode="decimal" value="' + (p.consigne != null ? String(p.consigne).replace('.', ',') : '') + '">' +
+    (meta ? '<div class="meta">' + meta + '</div>' : '') +
+    '<div class="actions"><button class="btn second" id="fAnnuler">Fermer</button><button class="btn" id="fEnregistrer">Enregistrer</button></div>';
+
+  $('fond').classList.remove('cache');
+  $('fAnnuler').onclick = fermerFiche;
+  $('fEnregistrer').onclick = enregistrerFiche;
+  if (mode === 'nouveau') {
+    $('fCat').onchange = () => { $('fTva').value = String(CATEGORIES[$('fCat').value].tva); };
+    let attente = null;
+    $('fDesc').oninput = () => { clearTimeout(attente); attente = setTimeout(majSemblables, 300); };
+    if (ficheCourante.code) {
+      $('fInfoOFF').textContent = 'Recherche dans Open Food Facts…';
+      const desc = await chercherOFF(ficheCourante.code);
+      if (!ficheCourante || ficheCourante.code !== p.code) return; // fiche fermée entre-temps
+      if (desc && !$('fDesc').value.trim()) {
+        $('fDesc').value = desc;
+        $('fInfoOFF').textContent = 'Désignation proposée par Open Food Facts : vérifiez-la.';
+        majSemblables();
+      } else {
+        $('fInfoOFF').textContent = desc ? '' : 'Inconnu dans Open Food Facts : saisissez la désignation.';
+      }
+    }
+    $('fDesc').focus();
+  }
+}
+
+function majSemblables() {
+  if (!ficheCourante || ficheCourante.mode !== 'nouveau') return;
+  const l = produitsSemblables($('fDesc').value, ficheCourante.code);
+  $('fSemblables').innerHTML = l.length
+    ? '<div class="alerte">Ressemble à un produit existant :<ul>' + l.map(p =>
+        '<li>' + esc(p.description) + ' <span class="aide">(' + esc(p.code) + ')</span></li>').join('') +
+      '</ul>Vérifiez que ce n\'est pas le même article.</div>'
+    : '';
+}
+
+function fermerFiche() {
+  $('fond').classList.add('cache');
+  $('fenetre').innerHTML = '';
+  ficheCourante = null;
+}
+
+async function enregistrerFiche() {
+  const desc = $('fDesc').value.trim();
+  if (!desc) { toast('La désignation est obligatoire.', 'warn'); $('fDesc').focus(); return; }
+  const donnees = {
+    description: desc,
+    codeRapport: $('fCat').value,
+    tvaPct: Number($('fTva').value),
+    prixVenteTTC: lireNombre($('fPrix').value),
+    consigne: lireNombre($('fConsigne').value)
+  };
+  const { mode, code } = ficheCourante;
+  const btn = $('fEnregistrer');
+  btn.disabled = true;
+  try {
+    if (mode === 'modif') {
+      // Une modification passe aussi hors ligne : elle part dès le retour du réseau
+      db.collection('produits').doc(code).update(Object.assign({}, donnees, {
+        modifiePar: utilisateur,
+        modifieLe: firebase.firestore.FieldValue.serverTimestamp()
+      })).catch(e => toast('Modification refusée : ' + e.code, 'ko'));
+      toast('Fiche enregistrée');
+      fermerFiche();
+      return;
+    }
+    // Création : le serveur garantit qu'une seule fiche existe par code
+    if (!navigator.onLine) {
+      if (code) ajouterAttente(code);
+      toast('Hors ligne : produit mis dans « Codes à créer ».', 'warn');
+      fermerFiche();
+      return;
+    }
+    const r = code ? await creerProduit(code, donnees) : await creerProduitInterne(donnees);
+    if (r.existe) {
+      toast('Déjà créé par ' + (r.fiche.creePar || 'un autre utilisateur') + ' : fiche ouverte.', 'warn');
+      retirerAttente(code);
+      ouvrirFiche('modif', r.fiche);
+      return;
+    }
+    retirerAttente(r.code);
+    toast('Produit créé' + (code ? '' : ' avec le code ' + r.code));
+    afficherResultat('✓ Créé : <b>' + esc(desc) + '</b><br><span class="aide">' + esc(r.code) + '</span>', 'ok');
+    fermerFiche();
+  } catch (e) {
+    console.error(e);
+    toast('Enregistrement impossible : ' + (e.code || e.message), 'ko');
+  } finally {
+    if ($('fEnregistrer')) btn.disabled = false;
+  }
+}
+
+function nouvelleFiche(code, donnees, source) {
+  const maintenant = firebase.firestore.FieldValue.serverTimestamp();
+  return Object.assign({ code }, donnees, {
+    source,
+    creePar: utilisateur, creeLe: maintenant,
+    modifiePar: utilisateur, modifieLe: maintenant
+  });
+}
+
+// Transaction : si l'autre téléphone a créé la fiche une seconde avant, on ne l'écrase pas
+async function creerProduit(code, donnees) {
+  const ref = db.collection('produits').doc(code);
+  return db.runTransaction(async tx => {
+    const s = await tx.get(ref);
+    if (s.exists) return { existe: true, fiche: s.data(), code };
+    tx.set(ref, nouvelleFiche(code, donnees, 'saisie'));
+    return { existe: false, code };
+  });
+}
+
+// Code interne 20xxxxxxxxxxC (plage GS1 réservée à l'usage en magasin), compteur partagé
+async function creerProduitInterne(donnees) {
+  const refCompteur = db.collection('compteurs').doc('codeInterne');
+  return db.runTransaction(async tx => {
+    const s = await tx.get(refCompteur);
+    const n = (s.exists ? s.data().n : 0) + 1;
+    const corps = '20' + String(n).padStart(10, '0');
+    const code = corps + chiffreControle(corps);
+    tx.set(refCompteur, { n });
+    tx.set(db.collection('produits').doc(code), nouvelleFiche(code, donnees, 'sans code-barres'));
+    return { existe: false, code };
+  });
+}
+
+// ============================================================
+//  CATALOGUE
+// ============================================================
+function renderPuces() {
+  const puces = [['tous', 'Tous']].concat(Object.entries(CATEGORIES).map(([c, v]) => [c, v.court]));
+  $('kPuces').innerHTML = puces.map(([c, n]) =>
+    '<button class="puce' + (c === filtreCategorie ? ' actif' : '') + '" data-cat="' + c + '">' + esc(n) + '</button>').join('');
+}
+$('kPuces').addEventListener('click', e => {
+  const b = e.target.closest('.puce');
+  if (!b) return;
+  filtreCategorie = b.dataset.cat;
+  renderPuces();
+  renderCatalogue();
+});
+$('kRecherche').addEventListener('input', () => renderCatalogue());
+
+function renderCatalogue() {
+  renderAttente();
+  const q = normaliserTexte($('kRecherche').value.trim());
+  const liste = [...catalogue.values()]
+    .filter(p => filtreCategorie === 'tous' || p.codeRapport === filtreCategorie)
+    .filter(p => !q || normaliserTexte(p.description).includes(q) || String(p.code).includes(q))
+    .sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr', { sensitivity: 'base' }));
+  $('kCompteur').textContent = liste.length + ' produit(s)' + (liste.length !== catalogue.size ? ' sur ' + catalogue.size : '');
+  $('kListe').innerHTML = liste.map(p => {
+    const cat = CATEGORIES[p.codeRapport];
+    return '<li data-code="' + esc(p.code) + '"><div class="desc"><div class="nom">' + esc(p.description) + '</div>' +
+      '<div class="sous">' + esc(p.code) + (cat ? '<span class="badge">' + esc(cat.court) + '</span>' : '') +
+      (p.source === 'sans code-barres' ? '<span class="badge orange">interne</span>' : '') + '</div></div>' +
+      '<div class="prix">' + euro(p.prixVenteTTC) + '</div></li>';
+  }).join('');
+}
+$('kListe').addEventListener('click', e => {
+  const li = e.target.closest('li');
+  if (li && catalogue.has(li.dataset.code)) ouvrirFiche('modif', catalogue.get(li.dataset.code));
+});
+
+// ============================================================
+//  IMPORT / EXPORT
+// ============================================================
+$('oImporter').addEventListener('click', async () => {
+  const f = $('oFichier').files[0];
+  if (!f) { toast('Choisissez d\'abord un fichier.', 'warn'); return; }
+  if (!navigator.onLine) { toast('L\'import demande une connexion.', 'warn'); return; }
+  const btn = $('oImporter');
+  btn.disabled = true;
+  btn.textContent = 'Import en cours…';
+  try {
+    const rapport = await importerCSV(await f.text());
+    $('oRapport').textContent = rapport;
+    $('oRapport').classList.remove('cache');
+    $('oFichier').value = '';
+  } catch (e) {
+    console.error(e);
+    toast('Import impossible : ' + (e.code || e.message), 'ko');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Importer';
+  }
+});
+
+async function importerCSV(texte) {
+  const lignes = texte.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
+  if (lignes.length < 2) throw new Error('Fichier vide');
+  const entete = lignes[0].split(';').map(s => s.trim().toLowerCase());
+  const col = nom => entete.indexOf(nom);
+  const iPlu = col('plu'), iDesc = col('description');
+  if (iPlu < 0 || iDesc < 0) throw new Error('Colonnes « plu » et « description » introuvables');
+  const iCat = col('code_rapport'), iPrix = col('prix_vente_ttc'), iTva = col('tva_pct'), iCons = col('consigne'), iStock = col('stock_fuelpos');
+
+  // Lecture sur le serveur (pas le cache) pour ne jamais écraser une fiche existante
+  const existants = new Set();
+  (await db.collection('produits').get({ source: 'server' })).forEach(d => existants.add(d.id));
+
+  const aCreer = [], rejetes = [], vus = new Set();
+  let deja = 0;
+  for (let i = 1; i < lignes.length; i++) {
+    const c = lignes[i].split(';');
+    const n = normaliserCode(c[iPlu]);
+    const desc = (c[iDesc] || '').trim();
+    if (!n.ok || !desc) { rejetes.push('Ligne ' + (i + 1) + ' : ' + (c[iPlu] || '?') + ' ' + desc + ' (' + (n.ok ? 'désignation vide' : n.raison) + ')'); continue; }
+    if (existants.has(n.code) || vus.has(n.code)) { deja++; continue; }
+    vus.add(n.code);
+    const cat = iCat >= 0 ? (c[iCat] || '').trim() : '';
+    const tva = iTva >= 0 ? lireNombre(c[iTva]) : null;
+    aCreer.push(nouvelleFiche(n.code, {
+      description: desc.slice(0, 40),
+      codeRapport: CATEGORIES[cat] ? cat : '0000',
+      tvaPct: tva != null ? tva : (CATEGORIES[cat] ? CATEGORIES[cat].tva : 21),
+      prixVenteTTC: iPrix >= 0 ? lireNombre(c[iPrix]) : null,
+      consigne: iCons >= 0 ? lireNombre(c[iCons]) : null,
+      stockFuelpos: iStock >= 0 ? lireNombre(c[iStock]) : null
+    }, 'import FuelPOS'));
+  }
+
+  for (let i = 0; i < aCreer.length; i += 400) {
+    const lot = db.batch();
+    aCreer.slice(i, i + 400).forEach(p => lot.set(db.collection('produits').doc(p.code), p));
+    await lot.commit();
+  }
+
+  let r = 'Produits créés : ' + aCreer.length + '\nDéjà présents (ignorés) : ' + deja + '\nLignes rejetées : ' + rejetes.length;
+  if (rejetes.length) r += '\n\n' + rejetes.join('\n');
+  return r;
+}
+
+$('oExporter').addEventListener('click', () => {
+  const lignes = [['plu', 'description', 'code_rapport', 'categorie', 'prix_vente_ttc', 'tva_pct', 'consigne', 'cree_par', 'source'].join(';')];
+  const tri = [...catalogue.values()].sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr'));
+  const num = v => v == null ? '' : String(v).replace('.', ',');
+  const txt = v => String(v == null ? '' : v).replace(/;/g, ',');
+  tri.forEach(p => lignes.push([
+    '="' + p.code + '"', // garde les zéros de tête dans Excel
+    txt(p.description), p.codeRapport || '', txt(CATEGORIES[p.codeRapport] ? CATEGORIES[p.codeRapport].nom : ''),
+    num(p.prixVenteTTC), num(p.tvaPct), num(p.consigne), txt(p.creePar), txt(p.source)
+  ].join(';')));
+  const blob = new Blob(['﻿' + lignes.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'catalogue_shop_' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+$('oDeconnexion').addEventListener('click', () => {
+  if (confirm('Se déconnecter ?')) auth.signOut();
+});
+
+demarrer();
+</script>
+</body>
+</html>
