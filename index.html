@@ -77,6 +77,12 @@ label{display:block;font-size:13px;font-weight:600;color:var(--gris);margin:10px
 .liste .prix{font-weight:600}
 .badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:#e8edf3;color:var(--bleu);margin-left:4px}
 .badge.orange{background:#fdf0e1;color:#9a5a12}
+.puces{flex-wrap:wrap}
+.liste li.groupe{display:block;cursor:default;background:#eef3fa;border-radius:8px;border-bottom:0;margin-top:12px;padding:8px 10px}
+.liste li.groupe:first-child{margin-top:0}
+.liste .prix.stock0{color:var(--gris);font-weight:400}
+.liste .prix.negatif{color:var(--rouge)}
+.sansprix{color:#9a5a12;font-weight:600}
 
 /* Fenêtre fiche */
 #fond{position:fixed;inset:0;background:rgba(15,25,40,.5);z-index:50;display:flex;align-items:flex-end;justify-content:center}
@@ -240,8 +246,15 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
     <!-- Onglet Catalogue -->
     <section id="ongletCatalogue" class="cache">
       <div class="carte">
-        <input type="search" id="kRecherche" placeholder="Rechercher un nom ou un code…">
-        <div class="puces" id="kPuces"></div>
+        <select id="kCat" aria-label="Code rapport"></select>
+        <input type="search" id="kRecherche" placeholder="Rechercher un nom ou un code…" style="margin-top:8px">
+        <div class="puces" id="kFiltres">
+          <button class="puce actif" data-etat="tous">Tous</button>
+          <button class="puce" data-etat="stock">En stock</button>
+          <button class="puce" data-etat="zero">Stock 0</button>
+          <button class="puce" data-etat="sansprix">Sans prix d'achat</button>
+          <button class="puce" data-etat="negatif">Négatif</button>
+        </div>
         <div class="compteur" id="kCompteur"></div>
         <ul class="liste" id="kListe"></ul>
       </div>
@@ -325,11 +338,18 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.3.0';
+const VERSION = 'v0.3.1';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.3.1', date: '28/10/2026', points: [
+    'Catalogue plus clair : choix du code rapport dans une liste, avec le code entre parenthèses et le nombre de produits.',
+    'En « Tous », produits groupés par code rapport, avec le nombre en stock et la valeur HT de chaque groupe.',
+    'Filtres rapides : En stock, Stock 0, Sans prix d\'achat, Négatif.',
+    'Chaque ligne montre le prix de vente TTC, le stock (grisé à 0, rouge si négatif) et le prix d\'achat HT.',
+    'Code rapport entre parenthèses dans la fiche produit et dans le relevé d\'inventaire.'
+  ] },
   { v: 'v0.3.0', date: '28/10/2026', points: [
     'Remise à zéro du stock par code rapport (Outils), avec sauvegarde automatique et annulation en un clic.',
     'Catégories gérées dans l\'appli : renommer, changer la TVA par défaut, en ajouter (Outils).',
@@ -410,6 +430,7 @@ let desabonnerRemises = null;
 let remisesRecentes = [];
 let ecritureEnAttente = false;
 let filtreCategorie = 'tous';
+let filtreEtat = 'tous';
 const CLE_ATTENTE = 'stockshop_attente';
 const CLE_SAISIE = 'stockshop_saisie';
 const CLE_FOURNISSEURS = 'stockshop_fournisseurs';
@@ -582,7 +603,6 @@ function afficherAppli() {
   $('oUtilisateur').textContent = utilisateur;
   $('oInfo').textContent = 'Version ' + VERSION;
   majEtat();
-  renderPuces();
   renderAttente();
   renderCategoriesOutils();
   ecouterCategories();
@@ -610,7 +630,6 @@ function reconstruireCategories() {
       tva: v.tva != null ? v.tva : 21
     };
   });
-  renderPuces();
   renderCatalogue();
   renderInventaire();
   renderCategoriesOutils();
@@ -956,7 +975,7 @@ async function ouvrirFiche(mode, p) {
   // Fiche d'un produit existant : entrées, comptage, historique, infos
   $('fenetre').innerHTML =
     '<div class="tete"><h2 id="fTitre">' + esc(p.description) + '</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
-    '<div class="aide">Code : <b>' + esc(p.code) + '</b>' + (CATEGORIES[p.codeRapport] ? ' · ' + esc(CATEGORIES[p.codeRapport].nom) : '') + '</div>' +
+    '<div class="aide">Code : <b>' + esc(p.code) + '</b>' + ' · ' + esc(libCategorie(p.codeRapport || '0000')) + '</div>' +
     '<div class="resume" id="fResume"></div>' +
     blocEntree(p) +
     blocComptage() +
@@ -1325,39 +1344,93 @@ function annulerMouvement(id) {
 // ============================================================
 //  CATALOGUE
 // ============================================================
-function renderPuces() {
-  const puces = [['tous', 'Tous']].concat(Object.entries(CATEGORIES).map(([c, v]) => [c, v.court]));
-  $('kPuces').innerHTML = puces.map(([c, n]) =>
-    '<button class="puce' + (c === filtreCategorie ? ' actif' : '') + '" data-cat="' + c + '">' + esc(n) + '</button>').join('');
+// Codes rapport présents : catégories connues + codes portés par des produits, dans l'ordre des codes
+function codesRapport() {
+  const s = new Set(Object.keys(CATEGORIES));
+  catalogue.forEach(p => s.add(p.codeRapport || '0000'));
+  const l = [...s].filter(c => c !== '0000').sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+  if (s.has('0000')) l.push('0000');
+  return l;
 }
-$('kPuces').addEventListener('click', e => {
-  const b = e.target.closest('.puce');
+
+// Liste déroulante des codes rapport, avec le nombre de produits
+function renderChoixCategorie() {
+  const sel = $('kCat');
+  if (!sel) return;
+  const compte = {};
+  catalogue.forEach(p => { const c = p.codeRapport || '0000'; compte[c] = (compte[c] || 0) + 1; });
+  const codes = codesRapport().filter(c => compte[c] || c !== '0000');
+  if (filtreCategorie !== 'tous' && !codes.includes(filtreCategorie)) filtreCategorie = 'tous';
+  sel.innerHTML = '<option value="tous">Tous les codes rapport (' + catalogue.size + ')</option>' +
+    codes.map(c => '<option value="' + esc(c) + '">' + esc(libCategorie(c)) + ' — ' + (compte[c] || 0) + ' produit(s)</option>').join('');
+  sel.value = filtreCategorie;
+}
+$('kCat').addEventListener('change', () => { filtreCategorie = $('kCat').value; renderCatalogue(); });
+$('kRecherche').addEventListener('input', () => renderCatalogue());
+$('kFiltres').addEventListener('click', e => {
+  const b = e.target.closest('[data-etat]');
   if (!b) return;
-  filtreCategorie = b.dataset.cat;
-  renderPuces();
+  filtreEtat = b.dataset.etat;
+  document.querySelectorAll('#kFiltres .puce').forEach(x => x.classList.toggle('actif', x === b));
   renderCatalogue();
 });
-$('kRecherche').addEventListener('input', () => renderCatalogue());
+
+const FILTRES_ETAT = {
+  tous: () => true,
+  stock: p => (p.stock || 0) > 0,
+  zero: p => (p.stock || 0) === 0,
+  sansprix: p => (p.stock || 0) > 0 && p.dernierPrixHT == null,
+  negatif: p => (p.stock || 0) < 0
+};
+
+function valeurProduit(p) {
+  return (p.stock || 0) > 0 && p.dernierPrixHT != null ? p.stock * p.dernierPrixHT : 0;
+}
+
+function ligneCatalogue(p) {
+  const st = p.stock || 0;
+  const classeStock = st < 0 ? 'negatif' : (st === 0 ? 'stock0' : '');
+  let achat = '';
+  if (p.dernierPrixHT != null) achat = 'PA ' + fmtPU(p.dernierPrixHT) + ' HT';
+  else if (st > 0) achat = '<span class="sansprix">sans prix d\'achat</span>';
+  return '<li data-code="' + esc(p.code) + '"><div class="desc"><div class="nom">' + esc(p.description) + '</div>' +
+    '<div class="sous">' + esc(p.code) + (p.prixVenteTTC != null ? ' · ' + euro(p.prixVenteTTC) + ' TTC' : '') +
+    (p.source === 'sans code-barres' ? '<span class="badge orange">interne</span>' : '') + '</div></div>' +
+    '<div class="droite"><div class="prix ' + classeStock + '">' + fmtQte(st) + ' u.</div>' +
+    '<div class="sous">' + achat + '</div></div></li>';
+}
 
 function renderCatalogue() {
   renderAttente();
+  renderChoixCategorie();
   const q = normaliserTexte($('kRecherche').value.trim());
+  const filtre = FILTRES_ETAT[filtreEtat] || FILTRES_ETAT.tous;
   const liste = [...catalogue.values()]
-    .filter(p => filtreCategorie === 'tous' || p.codeRapport === filtreCategorie)
+    .filter(p => filtreCategorie === 'tous' || (p.codeRapport || '0000') === filtreCategorie)
+    .filter(filtre)
     .filter(p => !q || normaliserTexte(p.description).includes(q) || String(p.code).includes(q))
     .sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr', { sensitivity: 'base' }));
-  $('kCompteur').textContent = liste.length + ' produit(s)' + (liste.length !== catalogue.size ? ' sur ' + catalogue.size : '');
-  $('kListe').innerHTML = liste.map(p => {
-    const cat = CATEGORIES[p.codeRapport];
-    return '<li data-code="' + esc(p.code) + '"><div class="desc"><div class="nom">' + esc(p.description) + '</div>' +
-      '<div class="sous">' + esc(p.code) + (cat ? '<span class="badge">' + esc(cat.court) + '</span>' : '') +
-      (p.source === 'sans code-barres' ? '<span class="badge orange">interne</span>' : '') + '</div></div>' +
-      '<div class="droite"><div class="prix">' + fmtQte(p.stock || 0) + ' u.</div>' +
-      '<div class="sous">' + (p.dernierPrixHT != null ? fmtPU(p.dernierPrixHT) + ' HT' : 'pas de prix') + '</div></div></li>';
+
+  const enStock = liste.filter(p => (p.stock || 0) > 0).length;
+  const valeur = arrondi(liste.reduce((s, p) => s + valeurProduit(p), 0), 2);
+  $('kCompteur').innerHTML = '<b>' + liste.length + '</b> produit(s) · ' + enStock + ' en stock · valeur <b>' + euro(valeur) + ' HT</b>';
+
+  if (!liste.length) { $('kListe').innerHTML = '<li class="groupe aide">Aucun produit ne correspond.</li>'; return; }
+  if (filtreCategorie !== 'tous') { $('kListe').innerHTML = liste.map(ligneCatalogue).join(''); return; }
+
+  // « Tous » : groupés par code rapport, dans l'ordre des listes FuelPOS
+  const groupes = {};
+  liste.forEach(p => { const c = p.codeRapport || '0000'; (groupes[c] = groupes[c] || []).push(p); });
+  $('kListe').innerHTML = codesRapport().filter(c => groupes[c]).map(c => {
+    const g = groupes[c];
+    const gStock = g.filter(p => (p.stock || 0) > 0).length;
+    const gValeur = arrondi(g.reduce((s, p) => s + valeurProduit(p), 0), 2);
+    return '<li class="groupe"><b>' + esc(libCategorie(c)) + '</b><br><span class="aide">' + g.length + ' produit(s) · ' +
+      gStock + ' en stock · ' + euro(gValeur) + ' HT</span></li>' + g.map(ligneCatalogue).join('');
   }).join('');
 }
 $('kListe').addEventListener('click', e => {
-  const li = e.target.closest('li');
+  const li = e.target.closest('li[data-code]');
   if (li && catalogue.has(li.dataset.code)) ouvrirFiche('modif', catalogue.get(li.dataset.code));
 });
 
@@ -1427,14 +1500,14 @@ function renderInventaire() {
   html += '<div class="defile"><table class="inv"><thead><tr><th>Code</th><th>Désignation</th><th class="n">Qté</th><th class="n">Prix U. HT</th><th class="n">Valeur HT</th></tr></thead><tbody>';
   let catCourante = null, sousTotal = 0;
   const fermerCat = () => {
-    if (catCourante !== null) html += '<tr class="st"><td></td><td>Sous-total ' + esc(nomCategorie(catCourante)) + '</td><td></td><td></td><td class="n">' + euro(arrondi(sousTotal, 2)) + '</td></tr>';
+    if (catCourante !== null) html += '<tr class="st"><td></td><td>Sous-total ' + esc(libCategorie(catCourante)) + '</td><td></td><td></td><td class="n">' + euro(arrondi(sousTotal, 2)) + '</td></tr>';
   };
   lignes.forEach(l => {
     const c = l.p.codeRapport || '0000';
     if (c !== catCourante) {
       fermerCat();
       catCourante = c; sousTotal = 0;
-      html += '<tr class="cat"><td colspan="5">' + esc(nomCategorie(c)) + '</td></tr>';
+      html += '<tr class="cat"><td colspan="5">' + esc(libCategorie(c)) + '</td></tr>';
     }
     sousTotal += l.valeur;
     html += '<tr><td class="code">' + esc(l.p.code) + '</td><td>' + esc(l.p.description) + '</td>' +
@@ -1447,6 +1520,10 @@ function renderInventaire() {
   html += '<div class="signature"><div>Établi par : ……………………………………</div><div>Date et signature : ……………………………………</div></div>';
   $('iReleve').innerHTML = html;
 }
+// « Tabac (4000) » : nom suivi du code rapport entre parenthèses
+function libCategorie(c) {
+  return nomCategorie(c) + ' (' + (c || '0000') + ')';
+}
 function nomCategorie(c) {
   if (CATEGORIES[c]) return CATEGORIES[c].nom;
   return c && c !== '0000' ? 'Code ' + c : 'Autre';
@@ -1458,7 +1535,7 @@ $('iExporter').addEventListener('click', () => {
   const txt = v => String(v == null ? '' : v).replace(/;/g, ',');
   const l = [['code', 'description', 'categorie', 'tva_pct', 'quantite', 'prix_unitaire_ht', 'valeur_ht', 'dernier_fournisseur'].join(';')];
   lignesInventaire($('iZero').checked).forEach(x => l.push([
-    '="' + x.p.code + '"', txt(x.p.description), txt(nomCategorie(x.p.codeRapport)), num(x.p.tvaPct),
+    '="' + x.p.code + '"', txt(x.p.description), txt(libCategorie(x.p.codeRapport || '0000')), num(x.p.tvaPct),
     num(x.q), num(x.pu), num(x.q > 0 && x.pu != null ? x.valeur : 0), txt(x.p.dernierFournisseur)
   ].join(';')));
   telecharger('inventaire_shop_' + jourLocal() + '.csv', '﻿' + l.join('\r\n'), 'text/csv;charset=utf-8');
@@ -1869,7 +1946,12 @@ function guideHTML() {
   '<p>Chaque fiche montre les entrées, comptages et remises à zéro, avec qui et quand. <b>Annuler</b> barre la ligne et corrige le stock : rien n\'est jamais effacé.</p></details>' +
 
   '<details><summary>7. Catalogue</summary>' +
-  '<p>Recherche par nom ou par code, filtre par catégorie. Chaque ligne affiche le stock et le dernier prix d\'achat HT. Touchez une ligne pour ouvrir la fiche ; les infos (désignation, prix de vente…) sont en bas de la fiche, dans « Infos produit ».</p></details>' +
+  '<ul><li><b>Liste déroulante</b> en haut : choisissez un code rapport, par exemple « Tabac (4000) », ou « Tous ».</li>' +
+  '<li>En « Tous », les produits sont <b>groupés par code rapport</b> comme sur les listes de la caisse. Chaque titre de groupe indique le nombre de produits, combien sont en stock et leur valeur HT.</li>' +
+  '<li><b>Filtres rapides</b> : En stock · Stock 0 · Sans prix d\'achat (produits en stock qui comptent pour 0 € dans l\'inventaire) · Négatif (à recompter).</li>' +
+  '<li>Recherche par nom ou par code-barres ; elle se combine avec le code rapport et le filtre.</li>' +
+  '<li>Chaque ligne : désignation, code-barres et prix de vente TTC à gauche ; stock et prix d\'achat HT (PA) à droite. Stock grisé à 0, rouge s\'il est négatif.</li></ul>' +
+  '<p>Le compteur en haut résume la sélection : nombre de produits, nombre en stock, valeur HT. Touchez une ligne pour ouvrir la fiche.</p></details>' +
 
   '<details><summary>8. Inventaire : valeur et relevé</summary>' +
   '<p>L\'onglet <b>Inventaire</b> calcule à tout moment la valeur du stock : quantité × dernier prix d\'achat HT, avec la répartition par taux de TVA et le détail par catégorie.</p>' +
