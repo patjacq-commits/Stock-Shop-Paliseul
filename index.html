@@ -138,6 +138,28 @@ table.inv td.code{font-family:ui-monospace,monospace;font-size:11px;color:var(--
 .attente li span{flex:1;font-family:ui-monospace,monospace}
 pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius:8px;padding:10px;margin:10px 0 0;max-height:240px;overflow:auto}
 
+/* Bouton d'aide dans l'en-tête */
+.btn-aide{border:1.5px solid rgba(255,255,255,.7);background:none;color:#fff;border-radius:50%;width:30px;height:30px;font-weight:700;font-size:15px;cursor:pointer;flex:none;padding:0}
+
+/* Catégories et remise à zéro */
+.cat-liste{list-style:none;margin:0;padding:0}
+.cat-liste li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #edf0f3;font-size:14px}
+.cat-liste li .desc{flex:1;min-width:0}
+.cat-liste .code{font-family:ui-monospace,monospace;color:var(--gris);font-size:12px}
+.apercu{background:#f3f6fa;border-radius:10px;padding:10px;font-size:14px;margin-top:10px}
+
+/* Mode d'emploi */
+.guide{font-size:15px}
+.guide details{border:1px solid var(--bord);border-radius:10px;margin-top:8px;padding:0 12px}
+.guide summary{cursor:pointer;font-weight:600;padding:10px 0}
+.guide details[open] summary{border-bottom:1px solid #edf0f3;margin-bottom:6px}
+.guide p,.guide li{margin:6px 0;line-height:1.45}
+.guide ul,.guide ol{padding-left:20px;margin:6px 0 10px}
+.guide .astuce{background:#eef3fa;border-radius:8px;padding:8px 10px;font-size:14px;margin:8px 0 10px}
+.nouv h3{font-size:15px;margin:14px 0 4px}
+.nouv ul{padding-left:20px;margin:4px 0}
+.nouv li{margin:4px 0}
+
 /* Impression du relevé d'inventaire */
 @media print{
   @page{size:A4;margin:14mm 12mm}
@@ -184,6 +206,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
     <div class="barre">
       <h1>Stock Shop <span class="version" id="vVersion"></span></h1>
       <div class="etat"><span class="pastille" id="pastille"></span><span id="etatTexte">En ligne</span></div>
+      <button class="btn-aide" id="bAide" aria-label="Mode d'emploi" title="Mode d'emploi">?</button>
     </div>
     <nav>
       <button data-onglet="scanner" class="actif">Scanner</button>
@@ -242,8 +265,36 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
         <h2>Importer un catalogue (CSV)</h2>
         <p class="aide">Fichier séparé par des points-virgules avec au moins les colonnes <b>plu</b> et <b>description</b>. Les produits déjà présents ne sont jamais écrasés.</p>
         <input type="file" id="oFichier" accept=".csv,text/csv" style="margin-top:10px">
+        <label class="coche" style="margin-top:10px"><input type="checkbox" id="oMaj"> Mettre à jour les articles existants</label>
+        <p class="aide" style="margin-top:0">Désignation, prix de vente, TVA, consigne et code rapport sont remplacés par ceux du fichier. Le stock et les prix d'achat ne sont jamais modifiés.</p>
         <button class="btn plein" id="oImporter" style="margin-top:10px">Importer</button>
         <pre class="rapport cache" id="oRapport"></pre>
+      </div>
+      <div class="carte">
+        <h2>Catégories (codes rapport)</h2>
+        <ul class="cat-liste" id="oCategories"></ul>
+        <button class="btn second plein" id="oNouvelleCat" style="margin-top:10px">+ Ajouter une catégorie</button>
+      </div>
+      <div class="carte">
+        <h2>Remise à zéro du stock</h2>
+        <label for="rzCat">Code rapport</label>
+        <select id="rzCat"></select>
+        <div class="apercu" id="rzApercu"></div>
+        <label for="rzMot">Pour confirmer, tapez ZERO</label>
+        <div class="ligne">
+          <input type="text" id="rzMot" autocomplete="off" autocapitalize="characters">
+          <button class="btn danger" id="rzOk">Remettre à zéro</button>
+        </div>
+        <p class="aide">Une sauvegarde complète est téléchargée juste avant. Les prix d'achat sont conservés.</p>
+        <h3 style="font-size:14px;margin:14px 0 4px">Dernières remises à zéro</h3>
+        <ul class="cat-liste" id="rzListe"><li class="aide">Aucune</li></ul>
+      </div>
+      <div class="carte">
+        <h2>Mode d'emploi</h2>
+        <div class="deux">
+          <button class="btn second" id="oAide">Ouvrir le mode d'emploi</button>
+          <button class="btn second" id="oNouv">Nouveautés</button>
+        </div>
       </div>
       <div class="carte">
         <h2>Exporter et sauvegarder</h2>
@@ -274,7 +325,31 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.2.0';
+const VERSION = 'v0.3.0';
+
+// Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
+// À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
+const NOUVEAUTES = [
+  { v: 'v0.3.0', date: '28/10/2026', points: [
+    'Remise à zéro du stock par code rapport (Outils), avec sauvegarde automatique et annulation en un clic.',
+    'Catégories gérées dans l\'appli : renommer, changer la TVA par défaut, en ajouter (Outils).',
+    'Import : un code rapport inconnu crée automatiquement sa catégorie.',
+    'Import : option « Mettre à jour les articles existants » (désignation, prix de vente, TVA, code rapport).',
+    'Mode d\'emploi intégré : bouton « ? » en haut à droite.'
+  ] },
+  { v: 'v0.2.1', date: '28/10/2026', points: [
+    'Nouvelles catégories : Gaz, Auto, Glaces, Tabac, Accessoires fumeur, Cautions.'
+  ] },
+  { v: 'v0.2.0', date: '27/10/2026', points: [
+    'Encodage des entrées : fournisseur, n° de facture, à l\'unité ou par carton, prix d\'achat HT.',
+    'Comptage pour corriger le stock, historique par produit avec annulation.',
+    'Onglet Inventaire : valeur HT, répartition par TVA, relevé imprimable et export CSV.',
+    'Sauvegarde complète des données.'
+  ] },
+  { v: 'v0.1.0', date: '27/10/2026', points: [
+    'Première version : connexion, catalogue partagé, scan, import du catalogue FuelPOS, anti-doublon.'
+  ] }
+];
 
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyC4-nO3HQrc4bPY4aoy419VBIbl7x8BAO0',
@@ -299,14 +374,26 @@ const ENTREPRISE = [
   'TVA BE 0466.490.717'
 ];
 
-// Catégories = codes rapport FuelPOS (affichées dans l'ordre des codes, « Autre » en dernier)
-const CATEGORIES = {
+// Catégories par défaut = codes rapport FuelPOS. Celles modifiées ou ajoutées dans l'appli
+// (collection Firestore « categories ») remplacent ou complètent cette liste.
+// Affichées dans l'ordre des codes, « Autre » en dernier.
+const CATEGORIES_DEFAUT = {
+  '1300': { nom: 'Gaz / bonbonnes', court: 'Gaz', tva: 21 },
+  '2119': { nom: 'Accessoires auto', court: 'Auto', tva: 21 },
   '3006': { nom: 'Alimentation / snacks', court: 'Alim.', tva: 6 },
-  '7119': { nom: 'Boissons sans alcool', court: 'Boissons', tva: 6 },
+  '3506': { nom: 'Glaces', court: 'Glaces', tva: 6 },
+  '4000': { nom: 'Tabac', court: 'Tabac', tva: 0 },
+  '4019': { nom: 'Accessoires fumeur', court: 'Fumeur', tva: 21 },
   '6019': { nom: 'Droguerie / divers', court: 'Droguerie', tva: 21 },
   '7019': { nom: 'Bières, vins, alcools', court: 'Alcools', tva: 21 },
+  '7100': { nom: 'Cautions / consignes', court: 'Cautions', tva: 0 },
+  '7119': { nom: 'Boissons sans alcool', court: 'Boissons', tva: 6 },
   '0000': { nom: 'Autre', court: 'Autre', tva: 21 }
 };
+
+// Liste en cours d'utilisation (défaut + Firestore), reconstruite à chaque changement
+const CATEGORIES = Object.assign({}, CATEGORIES_DEFAUT);
+let categoriesFirestore = {};
 
 // Au-delà de cet écart avec le dernier prix d'achat, on demande confirmation (faute de frappe probable)
 const ECART_PRIX_MAX = 0.5;
@@ -318,11 +405,15 @@ let db = null, auth = null;
 let utilisateur = null;          // prénom
 const catalogue = new Map();     // code -> fiche
 let desabonnerCatalogue = null;
+let desabonnerCategories = null;
+let desabonnerRemises = null;
+let remisesRecentes = [];
 let ecritureEnAttente = false;
 let filtreCategorie = 'tous';
 const CLE_ATTENTE = 'stockshop_attente';
 const CLE_SAISIE = 'stockshop_saisie';
 const CLE_FOURNISSEURS = 'stockshop_fournisseurs';
+const CLE_VERSION_VUE = 'stockshop_version_vue';
 
 const $ = id => document.getElementById(id);
 
@@ -459,6 +550,8 @@ function demarrer() {
     } else {
       utilisateur = null;
       if (desabonnerCatalogue) { desabonnerCatalogue(); desabonnerCatalogue = null; }
+      if (desabonnerCategories) { desabonnerCategories(); desabonnerCategories = null; }
+      if (desabonnerRemises) { desabonnerRemises(); desabonnerRemises = null; }
       afficherConnexion('');
     }
   });
@@ -491,7 +584,45 @@ function afficherAppli() {
   majEtat();
   renderPuces();
   renderAttente();
+  renderCategoriesOutils();
+  ecouterCategories();
   ecouterCatalogue();
+  ecouterRemises();
+  afficherNouveautesSiBesoin();
+}
+
+// Catégories modifiées ou ajoutées dans l'appli, partagées entre les téléphones
+function ecouterCategories() {
+  if (desabonnerCategories) desabonnerCategories();
+  desabonnerCategories = db.collection('categories').onSnapshot(snap => {
+    categoriesFirestore = {};
+    snap.forEach(d => { categoriesFirestore[d.id] = d.data(); });
+    reconstruireCategories();
+  }, err => console.warn('Catégories', err.code));
+}
+function reconstruireCategories() {
+  Object.keys(CATEGORIES).forEach(k => delete CATEGORIES[k]);
+  Object.assign(CATEGORIES, CATEGORIES_DEFAUT);
+  Object.entries(categoriesFirestore).forEach(([c, v]) => {
+    CATEGORIES[c] = {
+      nom: v.nom || ('Code ' + c),
+      court: v.court || c,
+      tva: v.tva != null ? v.tva : 21
+    };
+  });
+  renderPuces();
+  renderCatalogue();
+  renderInventaire();
+  renderCategoriesOutils();
+}
+
+function ecouterRemises() {
+  if (desabonnerRemises) desabonnerRemises();
+  desabonnerRemises = db.collection('remisesZero').orderBy('le', 'desc').limit(5).onSnapshot(snap => {
+    remisesRecentes = [];
+    snap.forEach(d => remisesRecentes.push(Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' }))));
+    renderRemises();
+  }, err => console.warn('Remises', err.code));
 }
 
 function majEtat() {
@@ -510,6 +641,8 @@ function ecouterCatalogue() {
     majEtat();
     renderCatalogue();
     renderInventaire();
+    renderCategoriesOutils();
+    renderApercuRZ();
     majResumeFiche();
   }, err => {
     console.error(err);
@@ -752,16 +885,18 @@ let desabonnerHistorique = null;
 let historiqueCourant = null;    // mouvements du produit ouvert, du plus récent au plus ancien
 
 function optionsCategories(choisi) {
-  return Object.entries(CATEGORIES).map(([c, v]) =>
-    '<option value="' + c + '"' + (c === choisi ? ' selected' : '') + '>' + esc(v.nom) + '</option>').join('');
+  let html = Object.entries(CATEGORIES).map(([c, v]) =>
+    '<option value="' + esc(c) + '"' + (c === choisi ? ' selected' : '') + '>' + esc(v.nom) + ' (' + esc(c) + ')</option>').join('');
+  if (choisi && !CATEGORIES[choisi]) html += '<option value="' + esc(choisi) + '" selected>Code ' + esc(choisi) + '</option>';
+  return html;
 }
 function optionsTva(choisi) {
   return [6, 12, 21, 0].map(t => '<option value="' + t + '"' + (t === choisi ? ' selected' : '') + '>' + t + ' %</option>').join('');
 }
 
 function champsProduit(p) {
-  const cat = p.codeRapport && CATEGORIES[p.codeRapport] ? p.codeRapport : '3006';
-  const tva = p.tvaPct != null ? p.tvaPct : CATEGORIES[cat].tva;
+  const cat = p.codeRapport || '3006';
+  const tva = p.tvaPct != null ? p.tvaPct : (CATEGORIES[cat] ? CATEGORIES[cat].tva : 21);
   return '<label for="fDesc">Désignation *</label>' +
     '<input type="text" id="fDesc" maxlength="40" value="' + esc(p.description || '') + '">' +
     '<div id="fSemblables"></div>' +
@@ -799,7 +934,7 @@ async function ouvrirFiche(mode, p) {
     $('fX').onclick = fermerFiche;
     $('fAnnuler').onclick = fermerFiche;
     $('fEnregistrer').onclick = enregistrerFiche;
-    $('fCat').onchange = () => { $('fTva').value = String(CATEGORIES[$('fCat').value].tva); };
+    $('fCat').onchange = () => { const c = CATEGORIES[$('fCat').value]; if (c) $('fTva').value = String(c.tva); };
     let attente = null;
     $('fDesc').oninput = () => { clearTimeout(attente); attente = setTimeout(majSemblables, 300); };
     if (ficheCourante.code) {
@@ -1156,6 +1291,8 @@ function renderHistorique() {
       if (m.modeSaisie === 'carton') txt += ' <span class="aide">(' + fmtQte(m.cartons) + ' carton(s) de ' + fmtQte(m.uniteParCarton) + ')</span>';
       const det = [m.fournisseur, m.facture ? 'fact. ' + m.facture : ''].filter(Boolean).join(' · ');
       if (det) txt += '<br><span class="aide">' + esc(det) + '</span>';
+    } else if (m.type === 'remiseZero') {
+      txt = 'Remise à zéro : ' + fmtQte(m.stockAvant) + ' → <b>0</b> (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ')';
     } else {
       txt = 'Comptage : ' + fmtQte(m.stockAvant) + ' → <b>' + fmtQte(m.stockCompte) + '</b> (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ')';
     }
@@ -1293,7 +1430,7 @@ function renderInventaire() {
     if (catCourante !== null) html += '<tr class="st"><td></td><td>Sous-total ' + esc(nomCategorie(catCourante)) + '</td><td></td><td></td><td class="n">' + euro(arrondi(sousTotal, 2)) + '</td></tr>';
   };
   lignes.forEach(l => {
-    const c = CATEGORIES[l.p.codeRapport] ? l.p.codeRapport : '0000';
+    const c = l.p.codeRapport || '0000';
     if (c !== catCourante) {
       fermerCat();
       catCourante = c; sousTotal = 0;
@@ -1311,7 +1448,8 @@ function renderInventaire() {
   $('iReleve').innerHTML = html;
 }
 function nomCategorie(c) {
-  return CATEGORIES[c] ? CATEGORIES[c].nom : 'Autre';
+  if (CATEGORIES[c]) return CATEGORIES[c].nom;
+  return c && c !== '0000' ? 'Code ' + c : 'Autre';
 }
 $('iZero').addEventListener('change', renderInventaire);
 $('iImprimer').addEventListener('click', () => { renderInventaire(); window.print(); });
@@ -1337,7 +1475,7 @@ $('oImporter').addEventListener('click', async () => {
   btn.disabled = true;
   btn.textContent = 'Import en cours…';
   try {
-    const rapport = await importerCSV(await f.text());
+    const rapport = await importerCSV(await f.text(), $('oMaj').checked);
     $('oRapport').textContent = rapport;
     $('oRapport').classList.remove('cache');
     $('oFichier').value = '';
@@ -1350,7 +1488,7 @@ $('oImporter').addEventListener('click', async () => {
   }
 });
 
-async function importerCSV(texte) {
+async function importerCSV(texte, avecMaj) {
   const lignes = texte.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
   if (lignes.length < 2) throw new Error('Fichier vide');
   const entete = lignes[0].split(';').map(s => s.trim().toLowerCase());
@@ -1359,39 +1497,93 @@ async function importerCSV(texte) {
   if (iPlu < 0 || iDesc < 0) throw new Error('Colonnes « plu » et « description » introuvables');
   const iCat = col('code_rapport'), iPrix = col('prix_vente_ttc'), iTva = col('tva_pct'), iCons = col('consigne'), iStock = col('stock_fuelpos');
 
-  // Lecture sur le serveur (pas le cache) pour ne jamais écraser une fiche existante
-  const existants = new Set();
-  (await db.collection('produits').get({ source: 'server' })).forEach(d => existants.add(d.id));
+  // Lecture sur le serveur (pas le cache) pour ne jamais écraser une fiche par erreur
+  const existants = new Map();
+  (await db.collection('produits').get({ source: 'server' })).forEach(d => existants.set(d.id, d.data()));
 
-  const aCreer = [], rejetes = [], vus = new Set();
-  let deja = 0;
+  const aCreer = [], aMettreAJour = [], rejetes = [], vus = new Set();
+  const nouvellesCats = {};   // code rapport inconnu -> { tva: compteurs }
+  let ignores = 0, inchanges = 0;
   for (let i = 1; i < lignes.length; i++) {
     const c = lignes[i].split(';');
     const n = normaliserCode(c[iPlu]);
     const desc = (c[iDesc] || '').trim();
     if (!n.ok || !desc) { rejetes.push('Ligne ' + (i + 1) + ' : ' + (c[iPlu] || '?') + ' ' + desc + ' (' + (n.ok ? 'désignation vide' : n.raison) + ')'); continue; }
-    if (existants.has(n.code) || vus.has(n.code)) { deja++; continue; }
+    if (vus.has(n.code)) { rejetes.push('Ligne ' + (i + 1) + ' : ' + n.code + ' ' + desc + ' (code en double dans le fichier)'); continue; }
     vus.add(n.code);
-    const cat = iCat >= 0 ? (c[iCat] || '').trim() : '';
-    const tva = iTva >= 0 ? lireNombre(c[iTva]) : null;
-    aCreer.push(nouvelleFiche(n.code, {
+    const cat = (iCat >= 0 ? (c[iCat] || '').trim() : '') || '0000';
+    const tvaLue = iTva >= 0 ? lireNombre(c[iTva]) : null;
+    if (!CATEGORIES[cat]) {
+      nouvellesCats[cat] = nouvellesCats[cat] || {};
+      const t = tvaLue != null ? tvaLue : 21;
+      nouvellesCats[cat][t] = (nouvellesCats[cat][t] || 0) + 1;
+    }
+    const donnees = {
       description: desc.slice(0, 40),
-      codeRapport: CATEGORIES[cat] ? cat : '0000',
-      tvaPct: tva != null ? tva : (CATEGORIES[cat] ? CATEGORIES[cat].tva : 21),
+      codeRapport: cat,
+      tvaPct: tvaLue != null ? tvaLue : (CATEGORIES[cat] ? CATEGORIES[cat].tva : 21),
       prixVenteTTC: iPrix >= 0 ? lireNombre(c[iPrix]) : null,
-      consigne: iCons >= 0 ? lireNombre(c[iCons]) : null,
-      stockFuelpos: iStock >= 0 ? lireNombre(c[iStock]) : null
-    }, 'import FuelPOS'));
+      consigne: iCons >= 0 ? lireNombre(c[iCons]) : null
+    };
+    const ancien = existants.get(n.code);
+    if (!ancien) {
+      aCreer.push(nouvelleFiche(n.code, Object.assign({}, donnees, {
+        stockFuelpos: iStock >= 0 ? lireNombre(c[iStock]) : null
+      }), 'import FuelPOS'));
+      continue;
+    }
+    if (!avecMaj) { ignores++; continue; }
+    // Seuls les champs présents dans le fichier sont comparés ; stock et prix d'achat ne sont jamais touchés
+    const maj = {};
+    const comparer = (champ, actif) => {
+      if (actif && donnees[champ] !== (ancien[champ] == null ? null : ancien[champ])) maj[champ] = donnees[champ];
+    };
+    comparer('description', true);
+    comparer('codeRapport', iCat >= 0);
+    comparer('tvaPct', iTva >= 0);
+    comparer('prixVenteTTC', iPrix >= 0);
+    comparer('consigne', iCons >= 0);
+    if (Object.keys(maj).length) aMettreAJour.push({ code: n.code, maj, avant: ancien });
+    else inchanges++;
   }
+
+  // Catégories inconnues : créées automatiquement, à renommer ensuite dans Outils
+  const lotCat = db.batch();
+  const creees = Object.entries(nouvellesCats).map(([code, tvas]) => {
+    const tva = Number(Object.entries(tvas).sort((a, b) => b[1] - a[1])[0][0]);
+    lotCat.set(db.collection('categories').doc(code), {
+      nom: 'Code ' + code, court: code, tva,
+      creePar: utilisateur, creeLe: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    return code;
+  });
+  if (creees.length) await lotCat.commit();
 
   for (let i = 0; i < aCreer.length; i += 400) {
     const lot = db.batch();
     aCreer.slice(i, i + 400).forEach(p => lot.set(db.collection('produits').doc(p.code), p));
     await lot.commit();
   }
+  const FV = firebase.firestore.FieldValue;
+  for (let i = 0; i < aMettreAJour.length; i += 400) {
+    const lot = db.batch();
+    aMettreAJour.slice(i, i + 400).forEach(m => lot.update(db.collection('produits').doc(m.code),
+      Object.assign({}, m.maj, { modifiePar: utilisateur, modifieLe: FV.serverTimestamp() })));
+    await lot.commit();
+  }
 
-  let r = 'Produits créés : ' + aCreer.length + '\nDéjà présents (ignorés) : ' + deja + '\nLignes rejetées : ' + rejetes.length;
-  if (rejetes.length) r += '\n\n' + rejetes.join('\n');
+  let r = 'Produits créés : ' + aCreer.length;
+  if (avecMaj) r += '\nProduits mis à jour : ' + aMettreAJour.length + '\nInchangés : ' + inchanges;
+  else r += '\nDéjà présents (ignorés) : ' + ignores;
+  r += '\nLignes rejetées : ' + rejetes.length;
+  if (creees.length) r += '\n\nNouvelles catégories créées : ' + creees.join(', ') + '\n→ donnez-leur un nom dans Outils > Catégories.';
+  if (aMettreAJour.length) {
+    r += '\n\nDétail des mises à jour :\n' + aMettreAJour.slice(0, 50).map(m =>
+      m.code + ' ' + (m.maj.description || m.avant.description) + ' : ' + Object.keys(m.maj).map(k => k + ' ' +
+        (m.avant[k] == null ? '—' : m.avant[k]) + ' → ' + (m.maj[k] == null ? '—' : m.maj[k])).join(', ')).join('\n') +
+      (aMettreAJour.length > 50 ? '\n…' : '');
+  }
+  if (rejetes.length) r += '\n\nRejets :\n' + rejetes.join('\n');
   return r;
 }
 
@@ -1415,19 +1607,30 @@ function versJSON(o) {
   Object.entries(o).forEach(([k, v]) => { r[k] = v && v.toDate ? v.toDate().toISOString() : v; });
   return r;
 }
+// Télécharge toutes les données dans un fichier .json ; lève une erreur si la lecture échoue
+async function sauvegarder(motif) {
+  const lire = async nom => {
+    const l = [];
+    (await db.collection(nom).get()).forEach(d => l.push(Object.assign({ id: d.id }, versJSON(d.data()))));
+    return l;
+  };
+  const mouvements = await lire('mouvements');
+  const remises = await lire('remisesZero');
+  const produits = [...catalogue.entries()].map(([id, p]) => Object.assign({ id }, versJSON(p)));
+  const contenu = JSON.stringify({
+    application: 'Stock Shop Paliseul', version: VERSION, date: new Date().toISOString(), par: utilisateur,
+    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises
+  }, null, 1);
+  const heure = new Date().toTimeString().slice(0, 5).replace(':', 'h');
+  telecharger('sauvegarde_stock_shop_' + jourLocal() + '_' + heure + '.json', contenu, 'application/json');
+  return { produits: produits.length, mouvements: mouvements.length };
+}
 $('oSauvegarde').addEventListener('click', async () => {
   const btn = $('oSauvegarde');
   btn.disabled = true;
   try {
-    const mouvements = [];
-    (await db.collection('mouvements').get()).forEach(d => mouvements.push(Object.assign({ id: d.id }, versJSON(d.data()))));
-    const produits = [...catalogue.entries()].map(([id, p]) => Object.assign({ id }, versJSON(p)));
-    const contenu = JSON.stringify({
-      application: 'Stock Shop Paliseul', version: VERSION, date: new Date().toISOString(), par: utilisateur,
-      produits, mouvements
-    }, null, 1);
-    telecharger('sauvegarde_stock_shop_' + jourLocal() + '.json', contenu, 'application/json');
-    toast('Sauvegarde : ' + produits.length + ' produits, ' + mouvements.length + ' mouvements');
+    const r = await sauvegarder('manuelle');
+    toast('Sauvegarde : ' + r.produits + ' produits, ' + r.mouvements + ' mouvements');
   } catch (e) {
     console.error(e);
     toast('Sauvegarde impossible : ' + (e.code || e.message), 'ko');
@@ -1436,9 +1639,313 @@ $('oSauvegarde').addEventListener('click', async () => {
   }
 });
 
+// ============================================================
+//  CATÉGORIES (Outils)
+// ============================================================
+function renderCategoriesOutils() {
+  const ul = $('oCategories');
+  if (!ul) return;
+  const compte = {};
+  catalogue.forEach(p => { const c = p.codeRapport || '0000'; compte[c] = (compte[c] || 0) + 1; });
+  // Codes utilisés par des produits mais absents de la liste (ancien import, etc.)
+  const codes = new Set(Object.keys(CATEGORIES));
+  Object.keys(compte).forEach(c => codes.add(c));
+  ul.innerHTML = [...codes].map(c => {
+    const v = CATEGORIES[c];
+    return '<li><div class="desc"><b>' + esc(v ? v.nom : 'Code ' + c) + '</b> <span class="code">' + esc(c) + '</span><br>' +
+      '<span class="aide">' + (v ? 'Abrégé « ' + esc(v.court) + ' » · TVA ' + esc(v.tva) + ' %' : 'Non définie') +
+      ' · ' + (compte[c] || 0) + ' produit(s)</span></div>' +
+      '<button class="btn second petit" data-cat="' + esc(c) + '">Modifier</button></li>';
+  }).join('');
+  majChoixRZ();
+}
+$('oCategories').addEventListener('click', e => {
+  const b = e.target.closest('[data-cat]');
+  if (b) ouvrirCategorie(b.dataset.cat);
+});
+$('oNouvelleCat').addEventListener('click', () => ouvrirCategorie(null));
+
+function ouvrirCategorie(code) {
+  const v = code ? (CATEGORIES[code] || { nom: 'Code ' + code, court: code, tva: 21 }) : { nom: '', court: '', tva: 21 };
+  ficheCourante = null;
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>' + (code ? 'Catégorie ' + esc(code) : 'Nouvelle catégorie') + '</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    (code ? '' : '<label for="kcCode">Code rapport FuelPOS *</label><input type="text" id="kcCode" inputmode="numeric" maxlength="6" autocomplete="off">') +
+    '<label for="kcNom">Nom *</label><input type="text" id="kcNom" maxlength="40" value="' + esc(v.nom) + '">' +
+    '<div class="deux">' +
+      '<div><label for="kcCourt">Nom abrégé (filtres)</label><input type="text" id="kcCourt" maxlength="12" value="' + esc(v.court) + '"></div>' +
+      '<div><label for="kcTva">TVA par défaut</label><select id="kcTva">' + optionsTva(v.tva) + '</select></div>' +
+    '</div>' +
+    '<p class="aide">La TVA par défaut sert aux nouveaux produits de cette catégorie. Les produits existants gardent leur propre taux.</p>' +
+    '<div class="actions"><button class="btn second" id="kcAnnuler">Annuler</button><button class="btn" id="kcOk">Enregistrer</button></div>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  $('kcAnnuler').onclick = fermerFiche;
+  $('kcOk').onclick = () => {
+    const c = code || $('kcCode').value.replace(/\D/g, '');
+    const nom = $('kcNom').value.trim();
+    if (!c) { toast('Indiquez le code rapport.', 'warn'); return; }
+    if (!code && CATEGORIES[c]) { toast('Le code ' + c + ' existe déjà.', 'warn'); return; }
+    if (!nom) { toast('Indiquez le nom.', 'warn'); return; }
+    db.collection('categories').doc(c).set({
+      nom, court: $('kcCourt').value.trim() || nom.slice(0, 12), tva: Number($('kcTva').value),
+      modifiePar: utilisateur, modifieLe: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true }).catch(e => toast('Enregistrement refusé : ' + e.code, 'ko'));
+    toast('Catégorie enregistrée');
+    fermerFiche();
+  };
+  (code ? $('kcNom') : $('kcCode')).focus();
+}
+
+// ============================================================
+//  REMISE À ZÉRO DU STOCK PAR CODE RAPPORT
+// ============================================================
+function majChoixRZ() {
+  const sel = $('rzCat');
+  const avant = sel.value || 'choisir';
+  const codes = new Set(Object.keys(CATEGORIES));
+  catalogue.forEach(p => codes.add(p.codeRapport || '0000'));
+  sel.innerHTML = '<option value="choisir">— Choisir —</option><option value="tous">Tous les codes rapport</option>' +
+    [...codes].map(c => '<option value="' + esc(c) + '">' + esc(nomCategorie(c)) + ' (' + esc(c) + ')</option>').join('');
+  sel.value = [...sel.options].some(o => o.value === avant) ? avant : 'choisir';
+  renderApercuRZ();
+}
+function produitsRZ(cat) {
+  if (!cat || cat === 'choisir') return [];
+  return [...catalogue.values()].filter(p => (cat === 'tous' || (p.codeRapport || '0000') === cat) && (p.stock || 0) !== 0);
+}
+function renderApercuRZ() {
+  if (!$('rzApercu')) return;
+  const cat = $('rzCat').value;
+  if (cat === 'choisir') { $('rzApercu').textContent = 'Choisissez un code rapport.'; return; }
+  const l = produitsRZ(cat);
+  const unites = l.reduce((s, p) => s + (p.stock || 0), 0);
+  const valeur = l.reduce((s, p) => s + ((p.stock || 0) > 0 && p.dernierPrixHT != null ? p.stock * p.dernierPrixHT : 0), 0);
+  $('rzApercu').innerHTML = l.length
+    ? '<b>' + l.length + '</b> produit(s) ont un stock : <b>' + fmtQte(unites) + '</b> unité(s), valeur <b>' + euro(arrondi(valeur, 2)) + ' HT</b>.'
+    : 'Aucun produit avec du stock dans cette sélection.';
+}
+$('rzCat').addEventListener('change', renderApercuRZ);
+
+$('rzOk').addEventListener('click', async () => {
+  const cat = $('rzCat').value;
+  const l = produitsRZ(cat);
+  if (cat === 'choisir') { toast('Choisissez un code rapport.', 'warn'); return; }
+  if (!l.length) { toast('Rien à remettre à zéro.', 'warn'); return; }
+  if ($('rzMot').value.trim().toUpperCase() !== 'ZERO') { toast('Tapez ZERO pour confirmer.', 'warn'); $('rzMot').focus(); return; }
+  if (!navigator.onLine) { toast('La remise à zéro demande une connexion.', 'warn'); return; }
+  const nomSel = cat === 'tous' ? 'tous les codes rapport' : nomCategorie(cat) + ' (' + cat + ')';
+  if (!confirm('Remettre à zéro le stock de ' + l.length + ' produit(s) — ' + nomSel + ' ?\n\nUne sauvegarde va d\'abord être téléchargée.')) return;
+  const btn = $('rzOk');
+  btn.disabled = true;
+  try {
+    await sauvegarder('avant remise à zéro ' + cat);
+  } catch (e) {
+    console.error(e);
+    toast('Sauvegarde impossible : remise à zéro annulée.', 'ko');
+    btn.disabled = false;
+    return;
+  }
+  try {
+    const FV = firebase.firestore.FieldValue;
+    const refRemise = db.collection('remisesZero').doc();
+    const unites = l.reduce((s, p) => s + (p.stock || 0), 0);
+    const valeur = l.reduce((s, p) => s + ((p.stock || 0) > 0 && p.dernierPrixHT != null ? p.stock * p.dernierPrixHT : 0), 0);
+    await refRemise.set({
+      codeRapport: cat, nomCategorie: nomSel, produits: l.length, unites: arrondi(unites, 3), valeurHT: arrondi(valeur, 2),
+      par: utilisateur, le: FV.serverTimestamp(), annulee: false
+    });
+    // 2 écritures par produit, lots de 200 produits (limite Firestore : 500 écritures par lot)
+    for (let i = 0; i < l.length; i += 200) {
+      const lot = db.batch();
+      l.slice(i, i + 200).forEach(p => {
+        const st = p.stock || 0;
+        lot.set(db.collection('mouvements').doc(), {
+          type: 'remiseZero', code: p.code, description: p.description || '',
+          quantite: -st, stockAvant: st, lot: refRemise.id, codeRapport: p.codeRapport || '0000',
+          par: utilisateur, le: FV.serverTimestamp(), jour: jourLocal(), annulee: false
+        });
+        // increment (et non « stock: 0 ») : une entrée encodée au même moment sur l'autre téléphone n'est pas perdue
+        lot.update(db.collection('produits').doc(p.code), { stock: FV.increment(-st), dernierComptageLe: FV.serverTimestamp() });
+      });
+      await lot.commit();
+    }
+    $('rzMot').value = '';
+    toast('Stock remis à zéro : ' + l.length + ' produit(s)');
+  } catch (e) {
+    console.error(e);
+    toast('Remise à zéro interrompue : ' + (e.code || e.message), 'ko');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function renderRemises() {
+  const ul = $('rzListe');
+  if (!ul) return;
+  if (!remisesRecentes.length) { ul.innerHTML = '<li class="aide">Aucune</li>'; return; }
+  ul.innerHTML = remisesRecentes.map(r =>
+    '<li><div class="desc"><b>' + esc(r.nomCategorie || r.codeRapport) + '</b><br><span class="aide">' + dateTexte(r.le) + ' · ' + esc(r.par) +
+    ' · ' + r.produits + ' produit(s), ' + euro(r.valeurHT) + ' HT' + (r.annulee ? ' · annulée par ' + esc(r.annuleePar) : '') + '</span></div>' +
+    (r.annulee ? '' : '<button class="btn second petit" data-rz="' + esc(r.id) + '">Annuler</button>') + '</li>').join('');
+}
+$('rzListe').addEventListener('click', e => {
+  const b = e.target.closest('[data-rz]');
+  if (b) annulerRemise(b.dataset.rz);
+});
+
+// Remet le stock de chaque produit comme avant (seulement les lignes pas encore annulées une par une)
+async function annulerRemise(id) {
+  const r = remisesRecentes.find(x => x.id === id);
+  if (!r || r.annulee) return;
+  if (!navigator.onLine) { toast('L\'annulation demande une connexion.', 'warn'); return; }
+  if (!confirm('Annuler la remise à zéro « ' + (r.nomCategorie || r.codeRapport) + ' » du ' + dateTexte(r.le) + ' ?\n\nLe stock de chaque produit sera remis comme avant. Les entrées et comptages faits depuis sont conservés.')) return;
+  try {
+    const FV = firebase.firestore.FieldValue;
+    const snap = await db.collection('mouvements').where('lot', '==', id).get({ source: 'server' });
+    const lignes = [];
+    snap.forEach(d => { const m = d.data(); if (!m.annulee) lignes.push(Object.assign({ id: d.id }, m)); });
+    for (let i = 0; i < lignes.length; i += 200) {
+      const lot = db.batch();
+      lignes.slice(i, i + 200).forEach(m => {
+        lot.update(db.collection('mouvements').doc(m.id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
+        lot.update(db.collection('produits').doc(m.code), { stock: FV.increment(-m.quantite) });
+      });
+      await lot.commit();
+    }
+    await db.collection('remisesZero').doc(id).update({ annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
+    toast('Remise à zéro annulée : ' + lignes.length + ' produit(s) rétabli(s)');
+  } catch (e) {
+    console.error(e);
+    toast('Annulation impossible : ' + (e.code || e.message), 'ko');
+  }
+}
+
 $('oDeconnexion').addEventListener('click', () => {
   if (confirm('Se déconnecter ?')) auth.signOut();
 });
+
+// ============================================================
+//  MODE D'EMPLOI ET NOUVEAUTÉS
+//  À METTRE À JOUR À CHAQUE MODIFICATION DE L'APPLI (avec NOUVEAUTES en haut du script)
+// ============================================================
+function guideHTML() {
+  return '<div class="guide">' +
+  '<p>Stock Shop sert à suivre le stock du shop et à sortir la valeur d\'inventaire à tout moment. Morgane et Martine ont les mêmes droits et voient les mêmes données en temps réel.</p>' +
+
+  '<details><summary>1. Installer et se connecter</summary>' +
+  '<ol><li>Ouvrez l\'adresse de l\'appli dans <b>Chrome</b> sur le téléphone.</li>' +
+  '<li>Menu ⋮ → <b>Ajouter à l\'écran d\'accueil</b> : l\'appli s\'ouvre ensuite comme les autres.</li>' +
+  '<li>Connectez-vous avec votre email et votre mot de passe. « Mot de passe oublié ? » envoie un email pour le changer.</li></ol>' +
+  '<p>La pastille en haut indique <b>En ligne</b> (verte) ou <b>Hors ligne</b> (orange). « synchro… » veut dire que des données attendent d\'être envoyées.</p></details>' +
+
+  '<details><summary>2. Scanner un produit</summary>' +
+  '<ol><li>Onglet <b>Scanner</b> → <b>Ouvrir la caméra</b>, visez le code-barres dans le cadre.</li>' +
+  '<li>Avec une douchette, ou pour taper un code : cliquez dans le champ « saisir / douchette » puis scannez ou tapez et faites Entrée.</li>' +
+  '<li>Produit connu : sa fiche s\'ouvre. Produit inconnu : la fiche « Nouveau produit » s\'ouvre.</li></ol>' +
+  '<div class="astuce">Les articles sans code-barres (bonbonnes de gaz, cautions, caisse Jupiler…) ont un numéro interne de 5 ou 6 chiffres : tapez-le dans le champ, ou cherchez-les par leur nom dans le Catalogue.</div>' +
+  '<p>« Code mal lu » : le code n\'est pas valide, rescannez.</p></details>' +
+
+  '<details><summary>3. Créer un nouveau produit</summary>' +
+  '<ol><li>Scannez-le : si Open Food Facts le connaît, la désignation est proposée. Vérifiez-la.</li>' +
+  '<li>Choisissez la catégorie (le taux de TVA se met tout seul), le prix de vente et la consigne éventuelle.</li>' +
+  '<li><b>Créer le produit</b> : la fiche s\'ouvre directement pour encoder la quantité.</li></ol>' +
+  '<p>Si l\'appli affiche « Ressemble à un produit existant », vérifiez que ce n\'est pas le même article avec un autre code.</p>' +
+  '<p>Si l\'autre téléphone vient de créer le même produit, vous voyez « Déjà créé par … » et sa fiche s\'ouvre : rien n\'est créé en double.</p>' +
+  '<p>Produit sans code-barres : bouton <b>Produit sans code-barres</b> dans Scanner, un numéro interne est attribué.</p></details>' +
+
+  '<details><summary>4. Encoder une livraison (entrée)</summary>' +
+  '<ol><li>Scannez le produit (ou ouvrez-le depuis le Catalogue).</li>' +
+  '<li>Fournisseur et n° de facture : ils restent remplis toute la journée, pratique pour une facture entière.</li>' +
+  '<li><b>À l\'unité</b> : quantité + prix unitaire HT. <b>Par carton</b> : nombre de cartons, unités par carton, prix HT du carton. L\'appli calcule le prix unitaire.</li>' +
+  '<li>Vérifiez le total HT affiché avec la facture, puis <b>Ajouter l\'entrée</b>.</li></ol>' +
+  '<p>L\'appli demande confirmation si le produit a déjà été encodé aujourd\'hui, ou si le prix s\'écarte de plus de 50 % du précédent (faute de frappe ?).</p>' +
+  '<div class="astuce">Hors ligne (réserve, chambre froide), l\'entrée est gardée dans le téléphone et envoyée dès le retour du réseau.</div></details>' +
+
+  '<details><summary>5. Compter et corriger le stock</summary>' +
+  '<p>Dans la fiche produit, partie <b>Comptage</b> : tapez la quantité réellement présente (rayon + réserve) puis <b>Corriger le stock</b>. L\'écart est enregistré dans l\'historique.</p></details>' +
+
+  '<details><summary>6. Historique et annulation</summary>' +
+  '<p>Chaque fiche montre les entrées, comptages et remises à zéro, avec qui et quand. <b>Annuler</b> barre la ligne et corrige le stock : rien n\'est jamais effacé.</p></details>' +
+
+  '<details><summary>7. Catalogue</summary>' +
+  '<p>Recherche par nom ou par code, filtre par catégorie. Chaque ligne affiche le stock et le dernier prix d\'achat HT. Touchez une ligne pour ouvrir la fiche ; les infos (désignation, prix de vente…) sont en bas de la fiche, dans « Infos produit ».</p></details>' +
+
+  '<details><summary>8. Inventaire : valeur et relevé</summary>' +
+  '<p>L\'onglet <b>Inventaire</b> calcule à tout moment la valeur du stock : quantité × dernier prix d\'achat HT, avec la répartition par taux de TVA et le détail par catégorie.</p>' +
+  '<ul><li><b>Imprimer / PDF</b> : relevé avec en-tête de la société et lignes de signature.</li>' +
+  '<li><b>Exporter (CSV)</b> : pour Excel ou le comptable.</li>' +
+  '<li>Les produits en stock <b>sans prix d\'achat</b> comptent pour 0 € et sont signalés : encodez une entrée pour leur donner un prix.</li></ul></details>' +
+
+  '<details><summary>9. Catégories (codes rapport)</summary>' +
+  '<p>Outils → <b>Catégories</b> : renommez une catégorie, changez son nom abrégé (filtres) ou sa TVA par défaut, ou ajoutez-en une avec son code rapport FuelPOS. La TVA par défaut ne s\'applique qu\'aux nouveaux produits.</p></details>' +
+
+  '<details><summary>10. Importer une liste FuelPOS</summary>' +
+  '<ol><li>Outils → <b>Importer</b>, choisissez le fichier CSV (préparé à partir des listes d\'articles de la caisse).</li>' +
+  '<li>Les articles nouveaux sont créés ; ceux déjà présents sont ignorés.</li>' +
+  '<li>Cochez <b>Mettre à jour les articles existants</b> pour reprendre les désignations, prix de vente, TVA et codes rapport de la caisse. Le stock et les prix d\'achat ne bougent jamais.</li></ol>' +
+  '<p>Un code rapport inconnu crée sa catégorie automatiquement (« Code 5019 ») : donnez-lui un nom dans Catégories.</p></details>' +
+
+  '<details><summary>11. Remise à zéro du stock</summary>' +
+  '<ol><li>Outils → <b>Remise à zéro</b> : choisissez un code rapport (ou tous).</li>' +
+  '<li>L\'aperçu montre le nombre de produits, d\'unités et la valeur concernés.</li>' +
+  '<li>Tapez <b>ZERO</b> puis <b>Remettre à zéro</b>. Une sauvegarde complète est d\'abord téléchargée.</li></ol>' +
+  '<p>Les prix d\'achat sont conservés. En cas d\'erreur, <b>Annuler</b> dans « Dernières remises à zéro » rétablit tous les stocks d\'un coup.</p>' +
+  '<div class="astuce">Usage typique : remettre une catégorie à zéro, puis la compter produit par produit (Comptage).</div></details>' +
+
+  '<details><summary>12. Sauvegarde</summary>' +
+  '<p>Outils → <b>Sauvegarde complète</b> télécharge toutes les données dans un fichier. Faites-en une par mois et gardez-la sur le PC.</p></details>' +
+
+  '<details><summary>13. Questions fréquentes</summary>' +
+  '<p><b>La caméra ne s\'ouvre pas ?</b> Autorisez la caméra pour le site dans Chrome (cadenas à gauche de l\'adresse).</p>' +
+  '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres. Créez la nouvelle fiche ; l\'ancienne restera à stock 0.</p>' +
+  '<p><b>L\'appli ne montre pas la dernière version ?</b> Fermez-la complètement et rouvrez-la. Le numéro de version est en haut à côté du titre.</p>' +
+  '<p><b>Le stock d\'un produit est négatif ?</b> Faites un comptage pour le corriger.</p></details>' +
+
+  '<details><summary>Historique des versions</summary><div class="nouv">' + nouveautesHTML(NOUVEAUTES) + '</div></details>' +
+  '<p class="aide" style="margin-top:12px">Version ' + VERSION + '</p>' +
+  '</div>';
+}
+
+function nouveautesHTML(liste) {
+  return liste.map(n => '<h3>' + esc(n.v) + ' — ' + esc(n.date) + '</h3><ul>' + n.points.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul>').join('');
+}
+
+function ouvrirGuide() {
+  arreterCamera();
+  nettoyerFiche();
+  ficheCourante = null;
+  $('fenetre').innerHTML = '<div class="tete"><h2>Mode d\'emploi</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    guideHTML() + '<div class="actions"><button class="btn second" id="fAnnuler">Fermer</button></div>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  $('fAnnuler').onclick = fermerFiche;
+  $('fenetre').scrollTop = 0;
+}
+
+// Montre les nouveautés des versions pas encore vues sur ce téléphone
+function ouvrirNouveautes(depuis) {
+  const i = NOUVEAUTES.findIndex(n => n.v === depuis);
+  const liste = i > 0 ? NOUVEAUTES.slice(0, i) : [NOUVEAUTES[0]];
+  ficheCourante = null;
+  $('fenetre').innerHTML = '<div class="tete"><h2>Nouveautés</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<div class="nouv">' + nouveautesHTML(liste) + '</div>' +
+    '<div class="actions"><button class="btn second" id="nGuide">Mode d\'emploi</button><button class="btn" id="fAnnuler">Compris</button></div>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  $('fAnnuler').onclick = fermerFiche;
+  $('nGuide').onclick = ouvrirGuide;
+}
+function afficherNouveautesSiBesoin() {
+  const vue = lireLocal(CLE_VERSION_VUE, null);
+  if (vue === VERSION) return;
+  ecrireLocal(CLE_VERSION_VUE, VERSION);
+  if (vue === null) ouvrirGuide();          // première utilisation sur ce téléphone
+  else ouvrirNouveautes(vue);
+}
+$('bAide').addEventListener('click', ouvrirGuide);
+$('oAide').addEventListener('click', ouvrirGuide);
+$('oNouv').addEventListener('click', () => ouvrirNouveautes(null));
 
 demarrer();
 </script>
