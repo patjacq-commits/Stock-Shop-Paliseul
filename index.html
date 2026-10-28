@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr-BE">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -25,7 +25,18 @@ button,input,select{font:inherit}
 .pastille{width:9px;height:9px;border-radius:50%;background:#7bd389;flex:none}
 .pastille.horsligne{background:#ff8a65}
 nav{display:flex;background:#fff;border-bottom:1px solid var(--bord)}
-nav button{flex:1;border:0;background:none;padding:11px 2px;color:var(--gris);font-weight:600;font-size:14px;border-bottom:3px solid transparent;cursor:pointer}
+nav button{flex:1;border:0;background:none;padding:11px 1px;color:var(--gris);font-weight:600;font-size:13px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+.nb-onglet{display:inline-block;background:var(--rouge);color:#fff;border-radius:9px;font-size:11px;min-width:18px;padding:0 5px;line-height:18px}
+.bandeau{display:flex;align-items:center;gap:8px;border-radius:12px;padding:10px 12px;margin-bottom:14px;font-size:14px}
+.bandeau span{flex:1}
+.bandeau.rouge{background:#fdecea;border:1px solid #f5c2bc}
+.bandeau.orange{background:#fdf0e1;border:1px solid #f2d2a9}
+.bandeau .fermer{width:30px;height:30px}
+.echeance{display:inline-block;font-size:12px;font-weight:700;border-radius:10px;padding:2px 8px;background:#e8edf3;color:var(--gris);white-space:nowrap}
+.echeance.rouge{background:#fdecea;color:var(--rouge)}
+.echeance.orange{background:#fdf0e1;color:#9a5a12}
+.badge.rouge{background:#fdecea;color:var(--rouge)}
+.histo .btn.petit{padding:6px 8px}
 nav button.actif{color:var(--bleu);border-bottom-color:var(--bleu)}
 
 main{max-width:760px;margin:0 auto;padding:14px}
@@ -42,7 +53,7 @@ main{max-width:760px;margin:0 auto;padding:14px}
 .ligne{display:flex;gap:8px;align-items:center}
 .ligne > input{flex:1;min-width:0}
 
-input[type=text],input[type=email],input[type=password],input[type=number],input[type=search],select{width:100%;padding:10px 12px;border:1px solid var(--bord);border-radius:10px;background:#fff;color:var(--texte)}
+input[type=text],input[type=email],input[type=password],input[type=number],input[type=search],input[type=date],input[type=month],select{width:100%;padding:10px 12px;border:1px solid var(--bord);border-radius:10px;background:#fff;color:var(--texte)}
 input:focus,select:focus{outline:2px solid var(--bleu2);outline-offset:0;border-color:var(--bleu2)}
 label{display:block;font-size:13px;font-weight:600;color:var(--gris);margin:10px 0 4px}
 
@@ -221,12 +232,14 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
     <nav>
       <button data-onglet="scanner" class="actif">Scanner</button>
       <button data-onglet="catalogue">Catalogue</button>
+      <button data-onglet="peremption">Péremption <span class="nb-onglet cache" id="nbPer"></span></button>
       <button data-onglet="inventaire">Inventaire</button>
       <button data-onglet="outils">Outils</button>
     </nav>
   </div>
 
   <main>
+    <div id="bandeauPer" class="bandeau cache"></div>
     <!-- Onglet Scanner -->
     <section id="ongletScanner">
       <div class="carte">
@@ -267,6 +280,21 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
       </div>
     </section>
 
+    <!-- Onglet Péremption -->
+    <section id="ongletPeremption" class="cache">
+      <div class="carte">
+        <h2>Dates de péremption</h2>
+        <div class="puces" id="perFiltres">
+          <button class="puce actif" data-per="alerte" id="perFiltreAlerte">À surveiller</button>
+          <button class="puce" data-per="rouge" id="perFiltreRouge">Urgent</button>
+          <button class="puce" data-per="tous">Tous les lots</button>
+        </div>
+        <div class="compteur" id="perCompteur"></div>
+        <ul class="liste" id="perListe"></ul>
+        <p class="aide">Touchez un lot pour ouvrir la fiche du produit : Épuisé, Jeté ou Promo.</p>
+      </div>
+    </section>
+
     <!-- Onglet Inventaire -->
     <section id="ongletInventaire" class="cache">
       <div class="carte no-print">
@@ -298,6 +326,15 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
         <h2>Catégories (codes rapport)</h2>
         <ul class="cat-liste" id="oCategories"></ul>
         <button class="btn second plein" id="oNouvelleCat" style="margin-top:10px">+ Ajouter une catégorie</button>
+      </div>
+      <div class="carte">
+        <h2>Péremption : seuils d'alerte</h2>
+        <div class="deux">
+          <div><label for="pRouge">Rouge : jours ou moins</label><input type="number" id="pRouge" min="0" max="365" inputmode="numeric"></div>
+          <div><label for="pOrange">Orange : jours ou moins</label><input type="number" id="pOrange" min="1" max="365" inputmode="numeric"></div>
+        </div>
+        <button class="btn second plein" id="pOk" style="margin-top:10px">Enregistrer les seuils</button>
+        <p class="aide">Les catégories suivies se règlent dans Catégories ; un produit peut être réglé à part dans sa fiche (Infos produit).</p>
       </div>
       <div class="carte">
         <h2>Remise à zéro du stock</h2>
@@ -349,11 +386,19 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.3.2';
+const VERSION = 'v0.4.0';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.4.0', date: '28/10/2026', points: [
+    'Dates de péremption : champ date (jour précis ou mois/année) et emplacement dans « Encoder une entrée ».',
+    'Fiche produit : section « Dates de péremption » avec Épuisé, Jeté (perte enregistrée) et Promo, et ajout d\'une date pour le stock déjà en rayon.',
+    'Nouvel onglet Péremption : lots triés par date, avec filtres « À surveiller » et « Urgent ».',
+    'Bandeau d\'alerte à l\'ouverture, compteur rouge sur l\'onglet et badge ⏰ dans le Catalogue.',
+    'Suivi activé pour l\'alimentation, les glaces, les boissons et les bières ; réglable par catégorie et par produit. Seuils (7 et 30 jours) réglables dans Outils.',
+    'Inventaire : total des pertes pour péremption de l\'année.'
+  ] },
   { v: 'v0.3.2', date: '28/10/2026', points: [
     'Import des fichiers Excel (.xlsx) directement, en plus du CSV.',
     'Import : aperçu avant toute modification (à créer, à mettre à jour, rejetés), puis bouton « Confirmer l\'import ».',
@@ -420,14 +465,14 @@ const ENTREPRISE = [
 const CATEGORIES_DEFAUT = {
   '1300': { nom: 'Gaz / bonbonnes', court: 'Gaz', tva: 21 },
   '2119': { nom: 'Accessoires auto', court: 'Auto', tva: 21 },
-  '3006': { nom: 'Alimentation / snacks', court: 'Alim.', tva: 6 },
-  '3506': { nom: 'Glaces', court: 'Glaces', tva: 6 },
+  '3006': { nom: 'Alimentation / snacks', court: 'Alim.', tva: 6, peremption: true },
+  '3506': { nom: 'Glaces', court: 'Glaces', tva: 6, peremption: true },
   '4000': { nom: 'Tabac', court: 'Tabac', tva: 0 },
   '4019': { nom: 'Accessoires fumeur', court: 'Fumeur', tva: 21 },
   '6019': { nom: 'Droguerie / divers', court: 'Droguerie', tva: 21 },
-  '7019': { nom: 'Bières, vins, alcools', court: 'Alcools', tva: 21 },
+  '7019': { nom: 'Bières, vins, alcools', court: 'Alcools', tva: 21, peremption: true },
   '7100': { nom: 'Cautions / consignes', court: 'Cautions', tva: 0 },
-  '7119': { nom: 'Boissons sans alcool', court: 'Boissons', tva: 6 },
+  '7119': { nom: 'Boissons sans alcool', court: 'Boissons', tva: 6, peremption: true },
   '0000': { nom: 'Autre', court: 'Autre', tva: 21 }
 };
 
@@ -610,6 +655,7 @@ function demarrer() {
       if (desabonnerCatalogue) { desabonnerCatalogue(); desabonnerCatalogue = null; }
       if (desabonnerCategories) { desabonnerCategories(); desabonnerCategories = null; }
       if (desabonnerRemises) { desabonnerRemises(); desabonnerRemises = null; }
+      arreterPeremption();
       afficherConnexion('');
     }
   });
@@ -645,6 +691,7 @@ function afficherAppli() {
   ecouterCategories();
   ecouterCatalogue();
   ecouterRemises();
+  ecouterPeremption();
   afficherNouveautesSiBesoin();
 }
 
@@ -664,7 +711,8 @@ function reconstruireCategories() {
     CATEGORIES[c] = {
       nom: v.nom || ('Code ' + c),
       court: v.court || c,
-      tva: v.tva != null ? v.tva : 21
+      tva: v.tva != null ? v.tva : 21,
+      peremption: v.peremption != null ? v.peremption : !!(CATEGORIES_DEFAUT[c] && CATEGORIES_DEFAUT[c].peremption)
     };
   });
   renderCatalogue();
@@ -746,7 +794,8 @@ $('cOubli').addEventListener('click', async () => {
 // ============================================================
 //  ONGLETS
 // ============================================================
-const ONGLETS = { scanner: 'ongletScanner', catalogue: 'ongletCatalogue', inventaire: 'ongletInventaire', outils: 'ongletOutils' };
+const ONGLETS = { scanner: 'ongletScanner', catalogue: 'ongletCatalogue', peremption: 'ongletPeremption', inventaire: 'ongletInventaire', outils: 'ongletOutils' };
+function allerOnglet(nom) { document.querySelector('nav [data-onglet="' + nom + '"]').click(); }
 document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('actif', x === b));
   const o = b.dataset.onglet;
@@ -963,7 +1012,13 @@ function champsProduit(p) {
       '<div><label for="fTva">TVA</label><select id="fTva">' + optionsTva(tva) + '</select></div>' +
     '</div>' +
     '<label for="fConsigne">Consigne (€)</label>' +
-    '<input type="text" id="fConsigne" inputmode="decimal" value="' + nombreChamp(p.consigne) + '">';
+    '<input type="text" id="fConsigne" inputmode="decimal" value="' + nombreChamp(p.consigne) + '">' +
+    '<label for="fSuivi">Dates de péremption</label>' +
+    '<select id="fSuivi">' +
+      '<option value=""' + (p.suiviPeremption == null ? ' selected' : '') + '>Selon la catégorie</option>' +
+      '<option value="oui"' + (p.suiviPeremption === true ? ' selected' : '') + '>Suivies pour ce produit</option>' +
+      '<option value="non"' + (p.suiviPeremption === false ? ' selected' : '') + '>Non suivies pour ce produit</option>' +
+    '</select>';
 }
 
 function metaProduit(p) {
@@ -1015,6 +1070,7 @@ async function ouvrirFiche(mode, p) {
     '<div class="aide">Code : <b>' + esc(p.code) + '</b>' + ' · ' + esc(libCategorie(p.codeRapport || '0000')) + '</div>' +
     '<div class="resume" id="fResume"></div>' +
     blocEntree(p) +
+    (suiviPeremption(p) || lotsActifs.some(l => l.code === p.code) ? blocPeremption(p) : '') +
     blocComptage() +
     '<div class="bloc"><h3>Historique</h3><ul class="histo" id="hListe"><li class="aide">Chargement…</li></ul></div>' +
     '<details class="bloc"><summary>Infos produit (désignation, catégorie, prix de vente)</summary>' +
@@ -1038,6 +1094,8 @@ async function ouvrirFiche(mode, p) {
     const b = e.target.closest('[data-annuler]');
     if (b) annulerMouvement(b.dataset.annuler);
   };
+  brancherDate('e');
+  brancherPeremptionFiche();
   majResumeFiche();
   majCalcul();
   ecouterHistorique(p.code);
@@ -1085,10 +1143,13 @@ async function enregistrerFiche() {
     codeRapport: $('fCat').value,
     tvaPct: Number($('fTva').value),
     prixVenteTTC: lireNombre($('fPrix').value),
-    consigne: lireNombre($('fConsigne').value)
+    consigne: lireNombre($('fConsigne').value),
+    suiviPeremption: $('fSuivi').value === '' ? null : $('fSuivi').value === 'oui'
   };
   const { mode, code } = ficheCourante;
   if (mode === 'modif') {
+    const avant = catalogue.get(code) || {};
+    const suiviChange = suiviPeremption(avant) !== suiviPeremption(Object.assign({}, avant, donnees));
     // Une modification passe aussi hors ligne : elle part dès le retour du réseau
     db.collection('produits').doc(code).update(Object.assign({}, donnees, {
       modifiePar: utilisateur,
@@ -1096,6 +1157,8 @@ async function enregistrerFiche() {
     })).catch(e => toast('Modification refusée : ' + e.code, 'ko'));
     $('fTitre').textContent = desc;
     toast('Infos enregistrées');
+    // Le suivi des dates a changé : on réaffiche la fiche avec (ou sans) les champs de date
+    if (suiviChange) ouvrirFiche('modif', Object.assign({}, avant, donnees));
     return;
   }
   // Création : le serveur garantit qu'une seule fiche existe par code
@@ -1208,6 +1271,7 @@ function blocEntree(p) {
       '<div><label for="ePc">Prix carton HT</label><input type="text" id="ePc" inputmode="decimal" autocomplete="off" value="' + nombreChamp(pc) + '"></div>' +
     '</div>' +
     '<div class="calcul" id="eCalcul"></div>' +
+    (suiviPeremption(p) ? champsDate('e', false) : '') +
     '<button class="btn plein" id="eAjouter" style="margin-top:10px">Ajouter l\'entrée</button>' +
   '</div>';
 }
@@ -1250,6 +1314,8 @@ function ajouterEntree() {
   if (!c.ok) { toast(c.msg, 'warn'); return; }
   const fourn = $('eFourn').value.trim();
   const fact = $('eFact').value.trim();
+  const datePer = $('eDate') ? lireDate('e') : null;
+  if (datePer && joursRestants(datePer.peremption) < 0 && !confirm('La date de péremption ' + dateLot(datePer) + ' est déjà dépassée. Continuer ?')) return;
 
   // Faute de frappe probable sur le prix ?
   if (p.dernierPrixHT > 0 && Math.abs(c.pu - p.dernierPrixHT) / p.dernierPrixHT > ECART_PRIX_MAX) {
@@ -1267,8 +1333,14 @@ function ajouterEntree() {
   const FV = firebase.firestore.FieldValue;
   const maintenant = FV.serverTimestamp();
   const lot = db.batch();
+  // Date de péremption : un lot est créé avec la quantité de l'entrée
+  let refLotPer = null;
+  if (datePer) {
+    refLotPer = db.collection('lots').doc();
+    lot.set(refLotPer, nouveauLot(code, p, datePer, c.qte, $('eEmp').value, 'entree'));
+  }
   lot.set(db.collection('mouvements').doc(), {
-    type: 'entree', code, description: p.description || '',
+    type: 'entree', code, description: p.description || '', lotPeremption: refLotPer ? refLotPer.id : null,
     quantite: c.qte, prixUnitaireHT: c.pu, totalHT: c.total,
     modeSaisie: c.mode, cartons: c.cartons || null, uniteParCarton: c.upc || null, prixCartonHT: c.pc != null ? c.pc : null,
     fournisseur: fourn || null, facture: fact || null,
@@ -1285,6 +1357,7 @@ function ajouterEntree() {
   toast('Entrée ajoutée : +' + fmtQte(c.qte) + ' ' + (p.description || ''));
   $('eQte').value = '';
   $('eNbc').value = '';
+  if ($('eDate')) $('eDate').value = '';
   majCalcul();
 }
 
@@ -1347,6 +1420,8 @@ function renderHistorique() {
       if (m.modeSaisie === 'carton') txt += ' <span class="aide">(' + fmtQte(m.cartons) + ' carton(s) de ' + fmtQte(m.uniteParCarton) + ')</span>';
       const det = [m.fournisseur, m.facture ? 'fact. ' + m.facture : ''].filter(Boolean).join(' · ');
       if (det) txt += '<br><span class="aide">' + esc(det) + '</span>';
+    } else if (m.type === 'perte') {
+      txt = 'Retiré (péremption) : <b>' + fmtQte(m.quantite) + '</b> · perte ' + euro(m.valeurHT) + ' HT';
     } else if (m.type === 'remiseZero') {
       txt = 'Remise à zéro : ' + fmtQte(m.stockAvant) + ' → <b>0</b> (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ')';
     } else {
@@ -1374,8 +1449,281 @@ function annulerMouvement(id) {
     maj.dernierFournisseur = precedente ? (precedente.fournisseur || null) : null;
   }
   lot.update(db.collection('produits').doc(m.code), maj);
+  // Lot de péremption lié : annulé avec l'entrée, ou remis en place si on annule un retrait
+  if (m.lotPeremption && m.type === 'entree') lot.update(db.collection('lots').doc(m.lotPeremption), { statut: 'annule', closPar: utilisateur, closLe: FV.serverTimestamp() });
+  if (m.lotPeremption && m.type === 'perte') lot.update(db.collection('lots').doc(m.lotPeremption), { quantite: FV.increment(-m.quantite), statut: 'actif' });
   lot.commit().catch(e => toast('Annulation refusée : ' + (e.code || e.message), 'ko'));
   toast('Mouvement annulé');
+}
+
+// ============================================================
+//  PÉREMPTION : lots datés, alertes, retraits
+//  Un « lot » = une quantité d'un produit avec une même date (souvent une livraison).
+// ============================================================
+const EMPLACEMENTS = ['Rayon', 'Frigo', 'Congélateur', 'Réserve', 'Comptoir'];
+const CLE_EMPLACEMENT = 'stockshop_emplacement';
+const CLE_BANDEAU = 'stockshop_bandeau_ferme';
+let lotsActifs = [];
+let desabonnerLots = null, desabonnerSeuils = null, desabonnerPertes = null;
+let seuils = { rouge: 7, orange: 30 };
+let pertes = [];
+let filtrePer = 'alerte';
+let alerteParProduit = new Map();   // code -> lot le plus proche en alerte
+
+// Suivi : choix du produit s'il existe, sinon celui de sa catégorie
+function suiviPeremption(p) {
+  if (p.suiviPeremption === true || p.suiviPeremption === false) return p.suiviPeremption;
+  const c = CATEGORIES[p.codeRapport || '0000'];
+  return !!(c && c.peremption);
+}
+function joursRestants(iso) {
+  const [a, m, j] = iso.split('-').map(Number);
+  const auj = new Date(); auj.setHours(0, 0, 0, 0);
+  return Math.round((new Date(a, m - 1, j) - auj) / 86400000);
+}
+function niveauLot(l) {
+  const j = joursRestants(l.peremption);
+  if (j <= seuils.rouge) return 'rouge';
+  if (j <= seuils.orange) return 'orange';
+  return '';
+}
+function texteEcheance(l) {
+  const j = joursRestants(l.peremption);
+  if (j < 0) return 'périmé depuis ' + (-j) + ' j';
+  if (j === 0) return 'périme aujourd\'hui';
+  return 'dans ' + j + ' j';
+}
+function dateLot(l) {
+  const [a, m, j] = l.peremption.split('-');
+  return l.precision === 'mois' ? 'fin ' + m + '/' + a : j + '/' + m + '/' + a;
+}
+
+// Champs de saisie d'une date (préfixe « e » pour l'entrée, « a » pour l'ajout manuel)
+function optionsEmplacement() {
+  const dernier = lireLocal(CLE_EMPLACEMENT, '');
+  return '<option value="">—</option>' + EMPLACEMENTS.map(e => '<option' + (e === dernier ? ' selected' : '') + '>' + e + '</option>').join('');
+}
+function champsDate(px, avecQte) {
+  return '<div class="' + (avecQte ? 'trois' : 'deux') + '">' +
+    '<div><label for="' + px + 'Date">Péremption</label><input type="date" id="' + px + 'Date"></div>' +
+    (avecQte ? '<div><label for="' + px + 'Qte">Quantité</label><input type="text" id="' + px + 'Qte" inputmode="decimal" autocomplete="off"></div>' : '') +
+    '<div><label for="' + px + 'Emp">Emplacement</label><select id="' + px + 'Emp">' + optionsEmplacement() + '</select></div>' +
+    '</div>' +
+    '<label class="coche" style="margin-top:6px"><input type="checkbox" id="' + px + 'Mois"> Mois et année seulement (« à consommer de préférence avant fin… »)</label>';
+}
+function brancherDate(px) {
+  const cb = $(px + 'Mois');
+  if (cb) cb.onchange = () => { $(px + 'Date').value = ''; $(px + 'Date').type = cb.checked ? 'month' : 'date'; };
+}
+// Renvoie { peremption: 'AAAA-MM-JJ', precision } ou null si le champ est vide
+function lireDate(px) {
+  const v = $(px + 'Date') ? $(px + 'Date').value : '';
+  if (!v) return null;
+  if ($(px + 'Mois').checked) {
+    const [a, m] = v.split('-').map(Number);
+    return { peremption: jourLocal(new Date(a, m, 0)), precision: 'mois' };   // dernier jour du mois
+  }
+  return { peremption: v, precision: 'jour' };
+}
+function nouveauLot(code, p, d, quantite, emplacement, source) {
+  const FV = firebase.firestore.FieldValue;
+  if (emplacement) ecrireLocal(CLE_EMPLACEMENT, emplacement);
+  return {
+    code, description: p.description || '', codeRapport: p.codeRapport || '0000',
+    peremption: d.peremption, precision: d.precision, quantite, quantiteInitiale: quantite,
+    emplacement: emplacement || null, promo: false, statut: 'actif', source,
+    creePar: utilisateur, creeLe: FV.serverTimestamp()
+  };
+}
+
+// ---------- Écoute en temps réel ----------
+function ecouterPeremption() {
+  if (desabonnerLots) desabonnerLots();
+  desabonnerLots = db.collection('lots').where('statut', '==', 'actif').onSnapshot(snap => {
+    lotsActifs = [];
+    snap.forEach(d => lotsActifs.push(Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' }))));
+    lotsActifs.sort((a, b) => a.peremption.localeCompare(b.peremption));
+    majAlertesPeremption();
+  }, err => console.warn('Lots', err.code));
+
+  if (desabonnerSeuils) desabonnerSeuils();
+  desabonnerSeuils = db.collection('parametres').doc('peremption').onSnapshot(s => {
+    const d = (s.exists && s.data()) || {};
+    seuils = { rouge: d.rouge != null ? d.rouge : 7, orange: d.orange != null ? d.orange : 30 };
+    $('pRouge').value = seuils.rouge;
+    $('pOrange').value = seuils.orange;
+    majAlertesPeremption();
+  }, err => console.warn('Seuils', err.code));
+
+  if (desabonnerPertes) desabonnerPertes();
+  desabonnerPertes = db.collection('mouvements').where('type', '==', 'perte').onSnapshot(snap => {
+    pertes = [];
+    snap.forEach(d => pertes.push(d.data({ serverTimestamps: 'estimate' })));
+    renderInventaire();
+  }, err => console.warn('Pertes', err.code));
+}
+function arreterPeremption() {
+  [desabonnerLots, desabonnerSeuils, desabonnerPertes].forEach(f => f && f());
+  desabonnerLots = desabonnerSeuils = desabonnerPertes = null;
+}
+
+function majAlertesPeremption() {
+  alerteParProduit = new Map();
+  lotsActifs.forEach(l => {
+    const n = niveauLot(l);
+    if (n && !alerteParProduit.has(l.code)) alerteParProduit.set(l.code, Object.assign({ niveau: n }, l));
+  });
+  const rouges = lotsActifs.filter(l => niveauLot(l) === 'rouge');
+  const nb = alerteParProduit.size;
+  $('nbPer').textContent = rouges.length || '';
+  $('nbPer').classList.toggle('cache', !rouges.length);
+  renderBandeau();
+  renderPeremption();
+  renderLotsFiche();
+  renderCatalogue();
+  return nb;
+}
+
+// ---------- Bandeau d'alerte (une fois par jour) ----------
+function renderBandeau() {
+  const b = $('bandeauPer');
+  const rouges = lotsActifs.filter(l => niveauLot(l) === 'rouge');
+  const perimes = rouges.filter(l => joursRestants(l.peremption) < 0).length;
+  const oranges = lotsActifs.filter(l => niveauLot(l) === 'orange').length;
+  const ferme = lireLocal(CLE_BANDEAU, '') === jourLocal();
+  if (ferme || (!rouges.length && !oranges)) { b.classList.add('cache'); return; }
+  let t = '⏰ ';
+  if (rouges.length) t += '<b>' + rouges.length + '</b> lot(s) à ' + seuils.rouge + ' jours ou moins' + (perimes ? ' (dont <b>' + perimes + '</b> périmé(s))' : '');
+  if (oranges) t += (rouges.length ? ' · ' : '') + oranges + ' entre ' + (seuils.rouge + 1) + ' et ' + seuils.orange + ' jours';
+  b.className = 'bandeau ' + (rouges.length ? 'rouge' : 'orange');
+  b.innerHTML = '<span>' + t + '</span><button class="btn petit" id="bVoir">Voir</button><button class="fermer" id="bFermer" aria-label="Masquer pour aujourd\'hui">✕</button>';
+  $('bVoir').onclick = () => allerOnglet('peremption');
+  $('bFermer').onclick = () => { ecrireLocal(CLE_BANDEAU, jourLocal()); renderBandeau(); };
+}
+
+// ---------- Onglet Péremption ----------
+function renderPeremption() {
+  const ul = $('perListe');
+  if (!ul) return;
+  document.querySelectorAll('#perFiltres .puce').forEach(x => x.classList.toggle('actif', x.dataset.per === filtrePer));
+  $('perFiltreAlerte').textContent = 'À surveiller (≤ ' + seuils.orange + ' j)';
+  $('perFiltreRouge').textContent = 'Urgent (≤ ' + seuils.rouge + ' j)';
+  const liste = lotsActifs.filter(l => filtrePer === 'tous' || (filtrePer === 'rouge' ? niveauLot(l) === 'rouge' : niveauLot(l) !== ''));
+  let valeur = 0;
+  liste.forEach(l => { const p = catalogue.get(l.code); if (p && p.dernierPrixHT != null) valeur += l.quantite * p.dernierPrixHT; });
+  $('perCompteur').innerHTML = '<b>' + liste.length + '</b> lot(s) · ' + fmtQte(liste.reduce((s, l) => s + l.quantite, 0)) +
+    ' unité(s) · valeur <b>' + euro(arrondi(valeur, 2)) + ' HT</b>';
+  if (!liste.length) {
+    ul.innerHTML = '<li class="groupe">' + (lotsActifs.length ? 'Aucun lot dans ce filtre.' : 'Aucune date encodée pour l\'instant. Ajoutez la date de péremption lors d\'une entrée, ou dans la fiche d\'un produit.') + '</li>';
+    return;
+  }
+  ul.innerHTML = liste.map(l => {
+    const n = niveauLot(l);
+    return '<li data-code="' + esc(l.code) + '"><div class="desc"><div class="nom">' + esc(l.description) + '</div>' +
+      '<div class="sous">' + dateLot(l) + ' · ' + fmtQte(l.quantite) + ' u.' + (l.emplacement ? ' · ' + esc(l.emplacement) : '') +
+      ' · ' + esc(libCategorie(l.codeRapport)) + (l.promo ? '<span class="badge">promo</span>' : '') + '</div></div>' +
+      '<div class="droite"><span class="echeance ' + n + '">' + texteEcheance(l) + '</span></div></li>';
+  }).join('');
+}
+$('perFiltres').addEventListener('click', e => {
+  const b = e.target.closest('[data-per]');
+  if (!b) return;
+  filtrePer = b.dataset.per;
+  renderPeremption();
+});
+$('perListe').addEventListener('click', e => {
+  const li = e.target.closest('li[data-code]');
+  if (li && catalogue.has(li.dataset.code)) ouvrirFiche('modif', catalogue.get(li.dataset.code));
+});
+
+// Seuils d'alerte (Outils)
+$('pOk').addEventListener('click', () => {
+  const r = parseInt($('pRouge').value, 10), o = parseInt($('pOrange').value, 10);
+  if (!(r >= 0) || !(o > r)) { toast('Le seuil orange doit être plus grand que le rouge.', 'warn'); return; }
+  db.collection('parametres').doc('peremption').set({ rouge: r, orange: o, modifiePar: utilisateur })
+    .catch(e => toast('Enregistrement refusé : ' + e.code, 'ko'));
+  toast('Seuils enregistrés');
+});
+
+// ---------- Section « Dates de péremption » de la fiche produit ----------
+function blocPeremption(p) {
+  return '<div class="bloc"><h3>Dates de péremption</h3>' +
+    '<ul class="histo" id="lListe"></ul>' +
+    '<details style="margin-top:6px"><summary class="lien" style="margin:0">+ Ajouter une date (stock déjà en rayon)</summary>' +
+      champsDate('a', true) +
+      '<button class="btn second plein" id="aOk" style="margin-top:8px">Ajouter la date</button>' +
+    '</details></div>';
+}
+function renderLotsFiche() {
+  const ul = $('lListe');
+  if (!ul || !ficheCourante) return;
+  const l = lotsActifs.filter(x => x.code === ficheCourante.code);
+  if (!l.length) { ul.innerHTML = '<li class="aide">Aucune date en cours pour ce produit.</li>'; return; }
+  ul.innerHTML = l.map(x => '<li><div class="desc"><span class="echeance ' + niveauLot(x) + '">' + texteEcheance(x) + '</span> ' +
+    '<b>' + dateLot(x) + '</b> · ' + fmtQte(x.quantite) + ' u.' + (x.emplacement ? ' · ' + esc(x.emplacement) : '') +
+    (x.promo ? ' <span class="badge">promo</span>' : '') + '</div>' +
+    '<button class="btn second petit" data-lot="' + esc(x.id) + '" data-act="epuise" title="Tout a été vendu">Épuisé</button>' +
+    '<button class="btn second petit" data-lot="' + esc(x.id) + '" data-act="jete" title="Retiré du rayon et jeté">Jeté</button>' +
+    '<button class="btn second petit" data-lot="' + esc(x.id) + '" data-act="promo">' + (x.promo ? 'Fin promo' : 'Promo') + '</button></li>').join('');
+}
+function brancherPeremptionFiche() {
+  if (!$('lListe')) return;
+  brancherDate('a');
+  $('lListe').onclick = e => {
+    const b = e.target.closest('[data-lot]');
+    if (b) actionLot(b.dataset.lot, b.dataset.act);
+  };
+  $('aOk').onclick = () => {
+    const code = ficheCourante.code;
+    const p = catalogue.get(code) || {};
+    const d = lireDate('a');
+    const q = lireNombre($('aQte').value);
+    if (!d) { toast('Indiquez la date de péremption.', 'warn'); return; }
+    if (!q || q <= 0) { toast('Indiquez la quantité concernée.', 'warn'); return; }
+    if (joursRestants(d.peremption) < 0 && !confirm('Cette date est déjà dépassée. Ajouter quand même ?')) return;
+    db.collection('lots').add(nouveauLot(code, p, d, q, $('aEmp').value, 'manuel'))
+      .catch(e => toast('Ajout refusé : ' + (e.code || e.message), 'ko'));
+    $('aDate').value = ''; $('aQte').value = '';
+    toast('Date ajoutée : ' + fmtQte(q) + ' u. au ' + dateLot(d));
+  };
+  renderLotsFiche();
+}
+
+// Épuisé / Jeté / Promo
+function actionLot(id, action) {
+  const l = lotsActifs.find(x => x.id === id);
+  if (!l) return;
+  const FV = firebase.firestore.FieldValue;
+  const refLot = db.collection('lots').doc(id);
+  if (action === 'promo') {
+    refLot.update({ promo: !l.promo, majPar: utilisateur, majLe: FV.serverTimestamp() }).catch(e => toast('Refusé : ' + e.code, 'ko'));
+    return;
+  }
+  if (action === 'epuise') {
+    if (!confirm('Lot du ' + dateLot(l) + ' épuisé (tout vendu) ? Il ne sera plus signalé.')) return;
+    refLot.update({ statut: 'epuise', closPar: utilisateur, closLe: FV.serverTimestamp() }).catch(e => toast('Refusé : ' + e.code, 'ko'));
+    toast('Lot marqué épuisé');
+    return;
+  }
+  // Retiré / jeté : diminue le stock et enregistre la perte au dernier prix d'achat
+  const rep = prompt('Quantité retirée et jetée (lot de ' + fmtQte(l.quantite) + ') :', String(l.quantite));
+  if (rep === null) return;
+  const q = lireNombre(rep);
+  if (!q || q <= 0) { toast('Quantité invalide.', 'warn'); return; }
+  const p = catalogue.get(l.code) || {};
+  const pu = p.dernierPrixHT != null ? p.dernierPrixHT : 0;
+  const lot = db.batch();
+  lot.set(db.collection('mouvements').doc(), {
+    type: 'perte', motif: 'péremption', code: l.code, description: p.description || l.description || '',
+    quantite: -q, prixUnitaireHT: pu, valeurHT: arrondi(q * pu, 2), lotPeremption: id, peremption: l.peremption,
+    par: utilisateur, le: FV.serverTimestamp(), jour: jourLocal(), annulee: false
+  });
+  lot.update(db.collection('produits').doc(l.code), { stock: FV.increment(-q) });
+  lot.update(refLot, q < l.quantite
+    ? { quantite: FV.increment(-q), majPar: utilisateur, majLe: FV.serverTimestamp() }
+    : { quantite: 0, statut: 'jete', closPar: utilisateur, closLe: FV.serverTimestamp() });
+  lot.commit().catch(e => toast('Retrait refusé : ' + (e.code || e.message), 'ko'));
+  toast('Retiré : ' + fmtQte(q) + ' u., perte ' + euro(arrondi(q * pu, 2)) + ' HT' + (pu ? '' : ' (pas de prix d\'achat)'));
 }
 
 // ============================================================
@@ -1447,7 +1795,8 @@ function ligneCatalogue(p) {
   else if (st > 0) achat = '<span class="sansprix">sans prix d\'achat</span>';
   return '<li data-code="' + esc(p.code) + '"><div class="desc"><div class="nom">' + esc(p.description) + '</div>' +
     '<div class="sous">' + esc(p.code) + (p.prixVenteTTC != null ? ' · ' + euro(p.prixVenteTTC) + ' TTC' : '') +
-    (p.source === 'sans code-barres' ? '<span class="badge orange">interne</span>' : '') + '</div></div>' +
+    (p.source === 'sans code-barres' ? '<span class="badge orange">interne</span>' : '') +
+    (alerteParProduit.has(p.code) ? '<span class="badge ' + alerteParProduit.get(p.code).niveau + '">⏰ ' + texteEcheance(alerteParProduit.get(p.code)) + '</span>' : '') + '</div></div>' +
     '<div class="droite"><div class="prix ' + classeStock + '">' + fmtQte(st) + ' u.</div>' +
     '<div class="sous">' + achat + '</div></div></li>';
 }
@@ -1547,6 +1896,7 @@ function renderInventaire() {
       '<div><span>Articles en stock</span><b>' + articles + '</b></div>' +
       '<div><span>Unités</span><b>' + fmtQte(unites) + '</b></div>' +
     '</div>' +
+    lignePertes() +
     '<table class="inv"><thead><tr><th>Taux de TVA</th><th class="n">Valeur HT</th></tr></thead><tbody>' +
       Object.keys(parTva).sort((a, b) => Number(a) - Number(b)).map(t =>
         '<tr><td>TVA ' + esc(t) + ' %</td><td class="n">' + euro(arrondi(parTva[t], 2)) + '</td></tr>').join('') +
@@ -1590,6 +1940,15 @@ function renderInventaire() {
 // « Tabac (4000) » : nom suivi du code rapport entre parenthèses
 function libCategorie(c) {
   return nomCategorie(c) + ' (' + (c || '0000') + ')';
+}
+// Pertes pour péremption de l'année en cours (retraits non annulés)
+function lignePertes() {
+  const an = String(new Date().getFullYear());
+  const l = pertes.filter(m => !m.annulee && String(m.jour || '').startsWith(an));
+  if (!l.length) return '';
+  const total = arrondi(l.reduce((s, m) => s + (m.valeurHT || 0), 0), 2);
+  return '<p class="aide" style="margin:0 0 6px">Pertes pour péremption en ' + an + ' : <b>' + euro(total) + ' HT</b> (' + l.length + ' retrait(s), ' +
+    fmtQte(l.reduce((s, m) => s + Math.abs(m.quantite), 0)) + ' unité(s)) — déjà sorties du stock.</p>';
 }
 function nomCategorie(c) {
   if (CATEGORIES[c]) return CATEGORIES[c].nom;
@@ -1991,10 +2350,11 @@ async function sauvegarder(motif) {
   };
   const mouvements = await lire('mouvements');
   const remises = await lire('remisesZero');
+  const lots = await lire('lots');
   const produits = [...catalogue.entries()].map(([id, p]) => Object.assign({ id }, versJSON(p)));
   const contenu = JSON.stringify({
     application: 'Stock Shop Paliseul', version: VERSION, date: new Date().toISOString(), par: utilisateur,
-    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises
+    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises, lots
   }, null, 1);
   const heure = new Date().toTimeString().slice(0, 5).replace(':', 'h');
   telecharger('sauvegarde_stock_shop_' + jourLocal() + '_' + heure + '.json', contenu, 'application/json');
@@ -2028,7 +2388,7 @@ function renderCategoriesOutils() {
   ul.innerHTML = [...codes].map(c => {
     const v = CATEGORIES[c];
     return '<li><div class="desc"><b>' + esc(v ? v.nom : 'Code ' + c) + '</b> <span class="code">' + esc(c) + '</span><br>' +
-      '<span class="aide">' + (v ? 'Abrégé « ' + esc(v.court) + ' » · TVA ' + esc(v.tva) + ' %' : 'Non définie') +
+      '<span class="aide">' + (v ? 'Abrégé « ' + esc(v.court) + ' » · TVA ' + esc(v.tva) + ' %' + (v.peremption ? ' · péremption suivie' : '') : 'Non définie') +
       ' · ' + (compte[c] || 0) + ' produit(s)</span></div>' +
       '<button class="btn second petit" data-cat="' + esc(c) + '">Modifier</button></li>';
   }).join('');
@@ -2051,6 +2411,7 @@ function ouvrirCategorie(code) {
       '<div><label for="kcCourt">Nom abrégé (filtres)</label><input type="text" id="kcCourt" maxlength="12" value="' + esc(v.court) + '"></div>' +
       '<div><label for="kcTva">TVA par défaut</label><select id="kcTva">' + optionsTva(v.tva) + '</select></div>' +
     '</div>' +
+    '<label class="coche" style="margin-top:12px"><input type="checkbox" id="kcPer"' + (v.peremption ? ' checked' : '') + '> Suivre les dates de péremption (alertes)</label>' +
     '<p class="aide">La TVA par défaut sert aux nouveaux produits de cette catégorie. Les produits existants gardent leur propre taux.</p>' +
     '<div class="actions"><button class="btn second" id="kcAnnuler">Annuler</button><button class="btn" id="kcOk">Enregistrer</button></div>';
   $('fond').classList.remove('cache');
@@ -2063,7 +2424,7 @@ function ouvrirCategorie(code) {
     if (!code && CATEGORIES[c]) { toast('Le code ' + c + ' existe déjà.', 'warn'); return; }
     if (!nom) { toast('Indiquez le nom.', 'warn'); return; }
     db.collection('categories').doc(c).set({
-      nom, court: $('kcCourt').value.trim() || nom.slice(0, 12), tva: Number($('kcTva').value),
+      nom, court: $('kcCourt').value.trim() || nom.slice(0, 12), tva: Number($('kcTva').value), peremption: $('kcPer').checked,
       modifiePar: utilisateur, modifieLe: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true }).catch(e => toast('Enregistrement refusé : ' + e.code, 'ko'));
     toast('Catégorie enregistrée');
@@ -2240,10 +2601,21 @@ function guideHTML() {
   '<details><summary>5. Compter et corriger le stock</summary>' +
   '<p>Dans la fiche produit, partie <b>Comptage</b> : tapez la quantité réellement présente (rayon + réserve) puis <b>Corriger le stock</b>. L\'écart est enregistré dans l\'historique.</p></details>' +
 
-  '<details><summary>6. Historique et annulation</summary>' +
+  '<details><summary>6. Dates de péremption</summary>' +
+  '<p>Le suivi est actif pour l\'alimentation, les glaces, les boissons et les bières. Il se règle par catégorie (Outils → Catégories) ou par produit (fiche → Infos produit).</p>' +
+  '<ol><li><b>À la livraison</b> : dans « Encoder une entrée », remplissez la <b>date de péremption</b> lue sur l\'emballage et, si vous voulez, l\'<b>emplacement</b> (rayon, frigo, réserve…). Cochez « Mois et année seulement » pour une date du type « à consommer de préférence avant fin 11/2026 ».</li>' +
+  '<li><b>Pour le stock déjà en rayon</b> : fiche du produit → Dates de péremption → « + Ajouter une date » (date, quantité, emplacement).</li></ol>' +
+  '<p><b>Alertes</b> : <span class="echeance rouge">rouge</span> si c\'est périmé ou à 7 jours ou moins, <span class="echeance orange">orange</span> jusqu\'à 30 jours. Les seuils se règlent dans Outils. Un bandeau s\'affiche à l\'ouverture (✕ pour le masquer jusqu\'au lendemain), l\'onglet Péremption affiche le nombre de lots urgents, et le Catalogue montre un badge ⏰.</p>' +
+  '<p>Pour chaque lot :</p><ul>' +
+  '<li><b>Épuisé</b> : tout a été vendu, le lot n\'est plus signalé.</li>' +
+  '<li><b>Jeté</b> : indiquez la quantité retirée. Le stock diminue et la perte est enregistrée au dernier prix d\'achat. Le total de l\'année apparaît dans l\'onglet Inventaire.</li>' +
+  '<li><b>Promo</b> : le lot reste suivi mais il est marqué « promo ».</li></ul>' +
+  '<div class="astuce">Annuler une entrée annule aussi sa date ; annuler un retrait (« Jeté ») dans l\'historique remet le lot et le stock comme avant.</div></details>' +
+
+  '<details><summary>7. Historique et annulation</summary>' +
   '<p>Chaque fiche montre les entrées, comptages et remises à zéro, avec qui et quand. <b>Annuler</b> barre la ligne et corrige le stock : rien n\'est jamais effacé.</p></details>' +
 
-  '<details><summary>7. Catalogue</summary>' +
+  '<details><summary>8. Catalogue</summary>' +
   '<ul><li><b>Liste déroulante</b> en haut : choisissez un code rapport, par exemple « Tabac (4000) », ou « Tous ».</li>' +
   '<li>En « Tous », les produits sont <b>groupés par code rapport</b> comme sur les listes de la caisse. Chaque titre de groupe indique le nombre de produits, combien sont en stock et leur valeur HT.</li>' +
   '<li><b>Filtres rapides</b> : En stock · Stock 0 · Sans prix d\'achat (produits en stock qui comptent pour 0 € dans l\'inventaire) · Négatif (à recompter).</li>' +
@@ -2252,16 +2624,16 @@ function guideHTML() {
   '<li>Chaque ligne : désignation, code-barres et prix de vente TTC à gauche ; stock et prix d\'achat HT (PA) à droite. Stock grisé à 0, rouge s\'il est négatif.</li></ul>' +
   '<p>Le compteur en haut résume la sélection : nombre de produits, nombre en stock, valeur HT. Touchez une ligne pour ouvrir la fiche.</p></details>' +
 
-  '<details><summary>8. Inventaire : valeur et relevé</summary>' +
+  '<details><summary>9. Inventaire : valeur et relevé</summary>' +
   '<p>L\'onglet <b>Inventaire</b> calcule à tout moment la valeur du stock : quantité × dernier prix d\'achat HT, avec la répartition par taux de TVA et le détail par catégorie.</p>' +
   '<ul><li><b>Imprimer / PDF</b> : relevé avec en-tête de la société et lignes de signature.</li>' +
   '<li><b>Exporter (CSV)</b> : pour Excel ou le comptable.</li>' +
   '<li>Les produits en stock <b>sans prix d\'achat</b> comptent pour 0 € et sont signalés : encodez une entrée pour leur donner un prix.</li></ul></details>' +
 
-  '<details><summary>9. Catégories (codes rapport)</summary>' +
+  '<details><summary>10. Catégories (codes rapport)</summary>' +
   '<p>Outils → <b>Catégories</b> : renommez une catégorie, changez son nom abrégé (filtres) ou sa TVA par défaut, ou ajoutez-en une avec son code rapport FuelPOS. La TVA par défaut ne s\'applique qu\'aux nouveaux produits.</p></details>' +
 
-  '<details><summary>10. Importer une liste (Excel ou CSV)</summary>' +
+  '<details><summary>11. Importer une liste (Excel ou CSV)</summary>' +
   '<ol><li>Outils → <b>Importer</b> : choisissez un fichier <b>Excel (.xlsx)</b> ou <b>CSV</b>.</li>' +
   '<li>Cochez <b>Mettre à jour les articles existants</b> si vous voulez reprendre les désignations, prix de vente, TVA et codes rapport du fichier. Sinon, les articles déjà présents sont ignorés.</li>' +
   '<li><b>Analyser le fichier</b> : un aperçu montre ce qui sera créé, mis à jour ou rejeté. <b>Rien n\'est encore modifié.</b></li>' +
@@ -2270,17 +2642,17 @@ function guideHTML() {
   '<p>Le stock et les prix d\'achat ne sont <b>jamais</b> modifiés par un import. Un code rapport inconnu crée sa catégorie (« Code 5019 ») : donnez-lui un nom dans Catégories.</p>' +
   '<div class="astuce"><b>Attention avec Excel</b> : si on ouvre un CSV dans Excel puis qu\'on l\'enregistre, Excel peut écrire les codes-barres en « 5,41E+12 » (les chiffres sont perdus). L\'appli refuse ces lignes. Solutions : importer le fichier d\'origine sans l\'ouvrir, ou, dans Excel, mettre la colonne des codes au format <b>Texte</b> avant de saisir, et enregistrer en <b>.xlsx</b>.</div></details>' +
 
-  '<details><summary>11. Remise à zéro du stock</summary>' +
+  '<details><summary>12. Remise à zéro du stock</summary>' +
   '<ol><li>Outils → <b>Remise à zéro</b> : choisissez un code rapport (ou tous).</li>' +
   '<li>L\'aperçu montre le nombre de produits, d\'unités et la valeur concernés.</li>' +
   '<li>Tapez <b>ZERO</b> puis <b>Remettre à zéro</b>. Une sauvegarde complète est d\'abord téléchargée.</li></ol>' +
   '<p>Les prix d\'achat sont conservés. En cas d\'erreur, <b>Annuler</b> dans « Dernières remises à zéro » rétablit tous les stocks d\'un coup.</p>' +
   '<div class="astuce">Usage typique : remettre une catégorie à zéro, puis la compter produit par produit (Comptage).</div></details>' +
 
-  '<details><summary>12. Sauvegarde</summary>' +
+  '<details><summary>13. Sauvegarde</summary>' +
   '<p>Outils → <b>Sauvegarde complète</b> télécharge toutes les données dans un fichier. Faites-en une par mois et gardez-la sur le PC.</p></details>' +
 
-  '<details><summary>13. Questions fréquentes</summary>' +
+  '<details><summary>14. Questions fréquentes</summary>' +
   '<p><b>La caméra ne s\'ouvre pas ?</b> Autorisez la caméra pour le site dans Chrome (cadenas à gauche de l\'adresse).</p>' +
   '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres. Créez la nouvelle fiche ; l\'ancienne restera à stock 0.</p>' +
   '<p><b>L\'appli ne montre pas la dernière version ?</b> Fermez-la complètement et rouvrez-la. Le numéro de version est en haut à côté du titre.</p>' +
