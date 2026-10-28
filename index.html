@@ -83,6 +83,10 @@ label{display:block;font-size:13px;font-weight:600;color:var(--gris);margin:10px
 .liste .prix.stock0{color:var(--gris);font-weight:400}
 .liste .prix.negatif{color:var(--rouge)}
 .sansprix{color:#9a5a12;font-weight:600}
+.recherche{position:relative;margin-top:8px}
+.recherche input{padding-right:44px}
+.recherche input::-webkit-search-cancel-button{display:none}
+.effacer{position:absolute;right:7px;top:50%;transform:translateY(-50%);border:0;background:#e8edf3;color:var(--bleu);border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:14px}
 
 /* Fenêtre fiche */
 #fond{position:fixed;inset:0;background:rgba(15,25,40,.5);z-index:50;display:flex;align-items:flex-end;justify-content:center}
@@ -142,7 +146,7 @@ table.inv td.code{font-family:ui-monospace,monospace;font-size:11px;color:var(--
 #toast.warn{background:var(--orange)}
 .attente li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #edf0f3}
 .attente li span{flex:1;font-family:ui-monospace,monospace}
-pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius:8px;padding:10px;margin:10px 0 0;max-height:240px;overflow:auto}
+pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius:8px;padding:10px;margin:10px 0 0;max-height:320px;overflow:auto}
 
 /* Bouton d'aide dans l'en-tête */
 .btn-aide{border:1.5px solid rgba(255,255,255,.7);background:none;color:#fff;border-radius:50%;width:30px;height:30px;font-weight:700;font-size:15px;cursor:pointer;flex:none;padding:0}
@@ -247,7 +251,10 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
     <section id="ongletCatalogue" class="cache">
       <div class="carte">
         <select id="kCat" aria-label="Code rapport"></select>
-        <input type="search" id="kRecherche" placeholder="Rechercher un nom ou un code…" style="margin-top:8px">
+        <div class="recherche">
+          <input type="search" id="kRecherche" placeholder="Rechercher un nom, un code-barres ou un code rapport…" autocomplete="off">
+          <button class="effacer cache" id="kEffacer" aria-label="Effacer la recherche">✕</button>
+        </div>
         <div class="puces" id="kFiltres">
           <button class="puce actif" data-etat="tous">Tous</button>
           <button class="puce" data-etat="stock">En stock</button>
@@ -276,12 +283,16 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
     <section id="ongletOutils" class="cache">
       <div class="carte">
         <h2>Importer un catalogue (CSV)</h2>
-        <p class="aide">Fichier séparé par des points-virgules avec au moins les colonnes <b>plu</b> et <b>description</b>. Les produits déjà présents ne sont jamais écrasés.</p>
-        <input type="file" id="oFichier" accept=".csv,text/csv" style="margin-top:10px">
+        <p class="aide">Fichier <b>Excel (.xlsx)</b> ou <b>CSV</b> avec au moins une colonne de code (PLU, EAN…) et une colonne de désignation. Un aperçu s'affiche avant toute modification.</p>
+        <input type="file" id="oFichier" accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="margin-top:10px">
         <label class="coche" style="margin-top:10px"><input type="checkbox" id="oMaj"> Mettre à jour les articles existants</label>
         <p class="aide" style="margin-top:0">Désignation, prix de vente, TVA, consigne et code rapport sont remplacés par ceux du fichier. Le stock et les prix d'achat ne sont jamais modifiés.</p>
-        <button class="btn plein" id="oImporter" style="margin-top:10px">Importer</button>
+        <button class="btn plein" id="oImporter" style="margin-top:10px">Analyser le fichier</button>
         <pre class="rapport cache" id="oRapport"></pre>
+        <div class="deux cache" id="oValidation" style="margin-top:10px">
+          <button class="btn second" id="oAnnulerImport">Annuler</button>
+          <button class="btn" id="oConfirmer">Confirmer l'import</button>
+        </div>
       </div>
       <div class="carte">
         <h2>Catégories (codes rapport)</h2>
@@ -338,11 +349,20 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.3.1';
+const VERSION = 'v0.3.2';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.3.2', date: '28/10/2026', points: [
+    'Import des fichiers Excel (.xlsx) directement, en plus du CSV.',
+    'Import : aperçu avant toute modification (à créer, à mettre à jour, rejetés), puis bouton « Confirmer l\'import ».',
+    'Import : colonnes reconnues sous plusieurs noms (PLU, EAN, code-barres, désignation, prix, TVA %…), séparateur et accents détectés automatiquement.',
+    'Import : les codes abîmés par Excel (5,41E+12) sont refusés avec une explication ; « 456 » retrouve l\'article « 000456 ».',
+    'Catalogue : la recherche reconnaît aussi un code rapport (taper 4000 affiche le tabac).',
+    'Catalogue : croix ✕ pour vider la recherche, et message clair avec bouton « Effacer la recherche et les filtres » quand la liste est vide.',
+    'Catalogue : le filtre rapide revient sur « Tous » quand on change de code rapport.'
+  ] },
   { v: 'v0.3.1', date: '28/10/2026', points: [
     'Catalogue plus clair : choix du code rapport dans une liste, avec le code entre parenthèses et le nombre de produits.',
     'En « Tous », produits groupés par code rapport, avec le nombre en stock et la valeur HT de chaque groupe.',
@@ -541,6 +561,23 @@ function normaliserCode(brut) {
   }
   if (!controleValide(c)) return { ok: false, raison: 'Chiffre de contrôle incorrect : code mal lu' };
   return { ok: true, code: c, interne: false };
+}
+
+// Numéro interne sans ses zéros de tête : « 456 » et « 000456 » désignent le même article
+function cleInterne(c) {
+  return String(c).replace(/^0+/, '') || '0';
+}
+// Retrouve la clé existante d'un code dans une Map (catalogue ou liste lue sur le serveur)
+function cleExistante(code, carte) {
+  if (carte.has(code)) return code;
+  if (code.length > 7) return null;
+  const k = cleInterne(code);
+  for (const id of carte.keys()) if (id.length <= 7 && cleInterne(id) === k) return id;
+  return null;
+}
+function chercherProduit(code) {
+  const id = cleExistante(code, catalogue);
+  return id ? catalogue.get(id) : null;
 }
 
 // ============================================================
@@ -795,7 +832,7 @@ function traiterCode(brut) {
     if (navigator.vibrate) navigator.vibrate([60, 60, 60]);
     return;
   }
-  const fiche = catalogue.get(n.code);
+  const fiche = chercherProduit(n.code);
   if (fiche) {
     afficherResultat('✓ <b>' + esc(fiche.description) + '</b><br><span class="aide">' + esc(n.code) + ' · stock ' + fmtQte(fiche.stock || 0) + '</span>', 'ok');
     ouvrirFiche('modif', fiche);
@@ -1365,16 +1402,31 @@ function renderChoixCategorie() {
     codes.map(c => '<option value="' + esc(c) + '">' + esc(libCategorie(c)) + ' — ' + (compte[c] || 0) + ' produit(s)</option>').join('');
   sel.value = filtreCategorie;
 }
-$('kCat').addEventListener('change', () => { filtreCategorie = $('kCat').value; renderCatalogue(); });
+$('kCat').addEventListener('change', () => {
+  filtreCategorie = $('kCat').value;
+  choisirFiltreEtat('tous');
+  renderCatalogue();
+});
 $('kRecherche').addEventListener('input', () => renderCatalogue());
+$('kEffacer').addEventListener('click', () => { $('kRecherche').value = ''; renderCatalogue(); $('kRecherche').focus(); });
+function choisirFiltreEtat(etat) {
+  filtreEtat = etat;
+  document.querySelectorAll('#kFiltres .puce').forEach(x => x.classList.toggle('actif', x.dataset.etat === etat));
+}
+function effacerFiltresCatalogue() {
+  $('kRecherche').value = '';
+  filtreCategorie = 'tous';
+  choisirFiltreEtat('tous');
+  renderCatalogue();
+}
 $('kFiltres').addEventListener('click', e => {
   const b = e.target.closest('[data-etat]');
   if (!b) return;
-  filtreEtat = b.dataset.etat;
-  document.querySelectorAll('#kFiltres .puce').forEach(x => x.classList.toggle('actif', x === b));
+  choisirFiltreEtat(b.dataset.etat);
   renderCatalogue();
 });
 
+const NOMS_FILTRES = { stock: 'En stock', zero: 'Stock 0', sansprix: 'Sans prix d\'achat', negatif: 'Négatif' };
 const FILTRES_ETAT = {
   tous: () => true,
   stock: p => (p.stock || 0) > 0,
@@ -1403,19 +1455,33 @@ function ligneCatalogue(p) {
 function renderCatalogue() {
   renderAttente();
   renderChoixCategorie();
-  const q = normaliserTexte($('kRecherche').value.trim());
+  const brut = $('kRecherche').value.trim();
+  const q = normaliserTexte(brut);
+  $('kEffacer').classList.toggle('cache', !brut);
   const filtre = FILTRES_ETAT[filtreEtat] || FILTRES_ETAT.tous;
+  // Un code rapport tapé exactement (ex. 4000) affiche cette catégorie, et rien d'autre
+  const estCodeRapport = /^\d+$/.test(q) && codesRapport().includes(q);
   const liste = [...catalogue.values()]
     .filter(p => filtreCategorie === 'tous' || (p.codeRapport || '0000') === filtreCategorie)
     .filter(filtre)
-    .filter(p => !q || normaliserTexte(p.description).includes(q) || String(p.code).includes(q))
+    .filter(p => !q || (estCodeRapport ? (p.codeRapport || '0000') === q
+      : normaliserTexte(p.description).includes(q) || String(p.code).includes(q)))
     .sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr', { sensitivity: 'base' }));
 
   const enStock = liste.filter(p => (p.stock || 0) > 0).length;
   const valeur = arrondi(liste.reduce((s, p) => s + valeurProduit(p), 0), 2);
   $('kCompteur').innerHTML = '<b>' + liste.length + '</b> produit(s) · ' + enStock + ' en stock · valeur <b>' + euro(valeur) + ' HT</b>';
 
-  if (!liste.length) { $('kListe').innerHTML = '<li class="groupe aide">Aucun produit ne correspond.</li>'; return; }
+  if (!liste.length) {
+    // Dire pourquoi la liste est vide
+    const raisons = [];
+    if (filtreCategorie !== 'tous') raisons.push('dans <b>' + esc(libCategorie(filtreCategorie)) + '</b>');
+    if (brut) raisons.push('pour la recherche « <b>' + esc(brut) + '</b> »');
+    if (filtreEtat !== 'tous') raisons.push('avec le filtre « <b>' + esc(NOMS_FILTRES[filtreEtat]) + '</b> »');
+    $('kListe').innerHTML = '<li class="groupe">Aucun produit ' + (raisons.join(', ') || '') + '.' +
+      (raisons.length ? '<br><button class="btn second petit" id="kToutAfficher" style="margin-top:8px">Effacer la recherche et les filtres</button>' : '') + '</li>';
+    return;
+  }
   if (filtreCategorie !== 'tous') { $('kListe').innerHTML = liste.map(ligneCatalogue).join(''); return; }
 
   // « Tous » : groupés par code rapport, dans l'ordre des listes FuelPOS
@@ -1430,6 +1496,7 @@ function renderCatalogue() {
   }).join('');
 }
 $('kListe').addEventListener('click', e => {
+  if (e.target.id === 'kToutAfficher') { effacerFiltresCatalogue(); return; }
   const li = e.target.closest('li[data-code]');
   if (li && catalogue.has(li.dataset.code)) ouvrirFiche('modif', catalogue.get(li.dataset.code));
 });
@@ -1544,123 +1611,354 @@ $('iExporter').addEventListener('click', () => {
 // ============================================================
 //  IMPORT / EXPORT / SAUVEGARDE
 // ============================================================
+// Import en deux temps : 1) analyse du fichier et aperçu, 2) écriture après confirmation
+let importEnAttente = null;
+
+$('oFichier').addEventListener('change', () => annulerImport());
+$('oMaj').addEventListener('change', () => annulerImport());
 $('oImporter').addEventListener('click', async () => {
   const f = $('oFichier').files[0];
   if (!f) { toast('Choisissez d\'abord un fichier.', 'warn'); return; }
   if (!navigator.onLine) { toast('L\'import demande une connexion.', 'warn'); return; }
   const btn = $('oImporter');
   btn.disabled = true;
+  btn.textContent = 'Analyse du fichier…';
+  annulerImport();
+  try {
+    const lignes = await lireFichierTableau(f);
+    importEnAttente = await analyserImport(lignes, $('oMaj').checked);
+    importEnAttente.fichier = f.name;
+    afficherApercuImport(importEnAttente);
+  } catch (e) {
+    console.error(e);
+    $('oRapport').textContent = 'Import impossible : ' + (e.message || e.code);
+    $('oRapport').classList.remove('cache');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Analyser le fichier';
+  }
+});
+$('oConfirmer').addEventListener('click', async () => {
+  if (!importEnAttente) return;
+  if (!navigator.onLine) { toast('L\'import demande une connexion.', 'warn'); return; }
+  const btn = $('oConfirmer');
+  btn.disabled = true;
   btn.textContent = 'Import en cours…';
   try {
-    const rapport = await importerCSV(await f.text(), $('oMaj').checked);
-    $('oRapport').textContent = rapport;
-    $('oRapport').classList.remove('cache');
+    const r = await executerImport(importEnAttente);
+    importEnAttente = null;
+    $('oValidation').classList.add('cache');
+    $('oRapport').textContent = r;
     $('oFichier').value = '';
+    toast('Import terminé');
   } catch (e) {
     console.error(e);
     toast('Import impossible : ' + (e.code || e.message), 'ko');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Importer';
+    btn.textContent = 'Confirmer l\'import';
   }
 });
+$('oAnnulerImport').addEventListener('click', () => { annulerImport(); toast('Import annulé : rien n\'a été modifié.'); });
+function annulerImport() {
+  importEnAttente = null;
+  $('oValidation').classList.add('cache');
+  $('oRapport').classList.add('cache');
+}
 
-async function importerCSV(texte, avecMaj) {
-  const lignes = texte.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
-  if (lignes.length < 2) throw new Error('Fichier vide');
-  const entete = lignes[0].split(';').map(s => s.trim().toLowerCase());
-  const col = nom => entete.indexOf(nom);
-  const iPlu = col('plu'), iDesc = col('description');
-  if (iPlu < 0 || iDesc < 0) throw new Error('Colonnes « plu » et « description » introuvables');
-  const iCat = col('code_rapport'), iPrix = col('prix_vente_ttc'), iTva = col('tva_pct'), iCons = col('consigne'), iStock = col('stock_fuelpos');
+// ---------- Lecture du fichier (CSV ou Excel .xlsx) en tableau de lignes ----------
+async function lireFichierTableau(f) {
+  const octets = new Uint8Array(await f.arrayBuffer());
+  const estZip = octets[0] === 0x50 && octets[1] === 0x4B;   // « PK » : un .xlsx est un fichier zip
+  if (/\.xls$/i.test(f.name) && !estZip) throw new Error('ancien format Excel (.xls). Dans Excel : Fichier > Enregistrer sous > « Classeur Excel (.xlsx) » ou « CSV ».');
+  if (/\.(ods|numbers)$/i.test(f.name)) throw new Error('format non pris en charge. Enregistrez le fichier en .xlsx ou en CSV.');
+  return estZip ? lireXlsx(octets) : lireCsv(decoderTexte(octets));
+}
 
-  // Lecture sur le serveur (pas le cache) pour ne jamais écraser une fiche par erreur
+// UTF-8 si possible, sinon Windows-1252 (CSV enregistré par Excel) : les accents restent justes
+function decoderTexte(o) {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(o); }
+  catch (e) { return new TextDecoder('windows-1252').decode(o); }
+}
+
+function lireCsv(texte) {
+  texte = texte.replace(/^﻿/, '');
+  const premiere = texte.split(/\r?\n/).find(l => l.trim()) || '';
+  // Séparateur le plus présent sur la première ligne : ; (Excel belge), tabulation ou virgule
+  const sep = [';', '\t', ','].map(s => [s, premiere.split(s).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const lignes = [];
+  let ligne = [], champ = '', guillemets = false;
+  for (let i = 0; i < texte.length; i++) {
+    const ch = texte[i];
+    if (guillemets) {
+      if (ch === '"') { if (texte[i + 1] === '"') { champ += '"'; i++; } else guillemets = false; }
+      else champ += ch;
+    } else if (ch === '"') guillemets = true;
+    else if (ch === sep) { ligne.push(champ); champ = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && texte[i + 1] === '\n') i++;
+      ligne.push(champ); lignes.push(ligne); ligne = []; champ = '';
+    } else champ += ch;
+  }
+  if (champ !== '' || ligne.length) { ligne.push(champ); lignes.push(ligne); }
+  return lignes.filter(l => l.some(c => String(c).trim() !== ''));
+}
+
+// Lecture d'un .xlsx sans librairie : dézippage par le navigateur, puis lecture du XML de la 1re feuille
+async function lireXlsx(o) {
+  const f = await dezipper(o, n => n === 'xl/sharedStrings.xml' || n === 'xl/workbook.xml' ||
+    n === 'xl/_rels/workbook.xml.rels' || /^xl\/worksheets\/[^/]+\.xml$/.test(n));
+  const xml = t => new DOMParser().parseFromString(t, 'application/xml');
+  const textes = el => [...el.getElementsByTagName('t')].filter(t => !t.closest || !t.parentNode || t.parentNode.nodeName !== 'rPh').map(t => t.textContent).join('');
+  const partages = [];
+  if (f['xl/sharedStrings.xml']) [...xml(f['xl/sharedStrings.xml']).getElementsByTagName('si')].forEach(si => partages.push(textes(si)));
+
+  let chemin = null;
+  try {
+    const feuille = xml(f['xl/workbook.xml']).getElementsByTagName('sheet')[0];
+    const rid = feuille.getAttribute('r:id') ||
+      feuille.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+    const rel = [...xml(f['xl/_rels/workbook.xml.rels']).getElementsByTagName('Relationship')].find(r => r.getAttribute('Id') === rid);
+    const cible = rel.getAttribute('Target');
+    chemin = cible.startsWith('/') ? cible.slice(1) : 'xl/' + cible.replace(/^\.\//, '');
+  } catch (e) { /* on prend la première feuille trouvée */ }
+  if (!chemin || !f[chemin]) chemin = Object.keys(f).filter(n => n.startsWith('xl/worksheets/')).sort()[0];
+  if (!chemin) throw new Error('aucune feuille trouvée dans le fichier Excel.');
+
+  const lignes = [];
+  [...xml(f[chemin]).getElementsByTagName('row')].forEach(r => {
+    const ligne = [];
+    [...r.getElementsByTagName('c')].forEach(c => {
+      const col = indexColonne((c.getAttribute('r') || '').replace(/\d+/g, ''));
+      const t = c.getAttribute('t');
+      const v = c.getElementsByTagName('v')[0];
+      let val;
+      if (t === 's') val = partages[Number(v ? v.textContent : -1)] || '';
+      else if (t === 'inlineStr') val = textes(c);
+      else val = v ? v.textContent : '';
+      // Nombre stocké en notation scientifique (pleine précision dans un .xlsx) → chiffres
+      if (t !== 's' && t !== 'inlineStr' && /^-?\d+(\.\d+)?e[+-]?\d+$/i.test(val)) {
+        const n = Number(val);
+        if (Number.isFinite(n) && Math.abs(n) < Number.MAX_SAFE_INTEGER && Math.abs(n) >= 1e6) val = Math.round(n).toString();
+      }
+      ligne[col >= 0 ? col : ligne.length] = val;
+    });
+    for (let i = 0; i < ligne.length; i++) if (ligne[i] === undefined) ligne[i] = '';
+    lignes.push(ligne);
+  });
+  return lignes.filter(l => l.some(c => String(c).trim() !== ''));
+}
+function indexColonne(lettres) {
+  let n = 0;
+  for (const ch of lettres.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+// Lit les fichiers voulus d'une archive zip (méthodes « stocké » et « deflate »)
+async function dezipper(o, garder) {
+  const dv = new DataView(o.buffer, o.byteOffset, o.byteLength);
+  let fin = -1;
+  for (let i = o.length - 22; i >= Math.max(0, o.length - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { fin = i; break; }
+  }
+  if (fin < 0) throw new Error('fichier Excel illisible.');
+  const nb = dv.getUint16(fin + 10, true);
+  let p = dv.getUint32(fin + 16, true);
+  const res = {}, dec = new TextDecoder();
+  for (let k = 0; k < nb; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const methode = dv.getUint16(p + 10, true);
+    const taille = dv.getUint32(p + 20, true);
+    const lgNom = dv.getUint16(p + 28, true), lgExtra = dv.getUint16(p + 30, true), lgCom = dv.getUint16(p + 32, true);
+    const local = dv.getUint32(p + 42, true);
+    const nom = dec.decode(o.subarray(p + 46, p + 46 + lgNom));
+    p += 46 + lgNom + lgExtra + lgCom;
+    if (!garder(nom)) continue;
+    const debut = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+    const brut = o.subarray(debut, debut + taille);
+    if (methode === 0) res[nom] = dec.decode(brut);
+    else if (methode === 8) {
+      const flux = new Blob([brut]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      res[nom] = await new Response(flux).text();
+    }
+  }
+  return res;
+}
+
+// ---------- Reconnaissance des colonnes ----------
+const ALIAS_COLONNES = {
+  code: ['plu', 'ean', 'codebarre', 'codebarres', 'codeean', 'gtin', 'barcode', 'codearticle', 'code'],
+  description: ['description', 'designation', 'libelle', 'article', 'produit', 'nomproduit', 'nom'],
+  codeRapport: ['coderapport', 'rapport', 'codecategorie', 'carte'],
+  prix: ['prixventettc', 'prixvente', 'prixttc', 'pvttc', 'prix', 'pv'],
+  tva: ['tvapct', 'tauxtva', 'tvataux', 'tva'],
+  consigne: ['consigne', 'caution'],
+  stock: ['stockfuelpos', 'stock']
+};
+const cleEntete = s => normaliserTexte(s).replace(/[^a-z0-9]/g, '');
+// L'en-tête peut ne pas être sur la 1re ligne (titre, adresse…) : on le cherche dans les 15 premières
+function trouverEntetes(lignes) {
+  for (let i = 0; i < Math.min(lignes.length, 15); i++) {
+    const cles = lignes[i].map(cleEntete);
+    const idx = {}, pris = new Set();
+    Object.entries(ALIAS_COLONNES).forEach(([champ, noms]) => {
+      for (const n of noms) {
+        const j = cles.indexOf(n);
+        if (j >= 0 && !pris.has(j)) { idx[champ] = j; pris.add(j); break; }
+      }
+    });
+    if (idx.code != null && idx.description != null) return { ligne: i, idx };
+  }
+  return null;
+}
+function lireCodeImport(brut) {
+  let s = String(brut == null ? '' : brut).trim().replace(/^=/, '').replace(/^"|"$/g, '');
+  if (/\d[.,]\d*e\+?\d+/i.test(s)) return { ok: false, raison: 'code abîmé par Excel (notation scientifique) : mettez la colonne en format Texte ou utilisez le fichier d\'origine' };
+  s = s.replace(/[.,]0+$/, '');   // « 4000,0 » ou « 5410228214939.0 »
+  return normaliserCode(s);
+}
+function lireNombreImport(brut) {
+  const s = String(brut == null ? '' : brut).trim();
+  if (!s) return null;
+  if (/^-?\d+$/.test(s)) return Number(s);
+  // « 1.234,56 » (Excel belge) ou « 1,234.56 » : le dernier séparateur est la décimale
+  const dernier = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'));
+  const propre = s.slice(0, dernier).replace(/[^\d-]/g, '') + '.' + s.slice(dernier + 1).replace(/\D/g, '');
+  const v = parseFloat(propre);
+  return isNaN(v) ? null : v;
+}
+
+// ---------- Analyse : rien n'est écrit ----------
+async function analyserImport(lignes, avecMaj) {
+  if (lignes.length < 2) throw new Error('le fichier est vide.');
+  const ent = trouverEntetes(lignes);
+  if (!ent) throw new Error('colonnes introuvables. Il faut au moins une colonne de code (PLU, EAN, code-barres…) et une colonne de désignation (description, désignation, libellé…).');
+  const ix = ent.idx;
+  const val = (c, champ) => ix[champ] != null ? c[ix[champ]] : undefined;
+
+  // Lecture sur le serveur (pas le cache) pour comparer avec les données réelles
   const existants = new Map();
   (await db.collection('produits').get({ source: 'server' })).forEach(d => existants.set(d.id, d.data()));
 
-  const aCreer = [], aMettreAJour = [], rejetes = [], vus = new Set();
-  const nouvellesCats = {};   // code rapport inconnu -> { tva: compteurs }
-  let ignores = 0, inchanges = 0;
-  for (let i = 1; i < lignes.length; i++) {
-    const c = lignes[i].split(';');
-    const n = normaliserCode(c[iPlu]);
-    const desc = (c[iDesc] || '').trim();
-    if (!n.ok || !desc) { rejetes.push('Ligne ' + (i + 1) + ' : ' + (c[iPlu] || '?') + ' ' + desc + ' (' + (n.ok ? 'désignation vide' : n.raison) + ')'); continue; }
-    if (vus.has(n.code)) { rejetes.push('Ligne ' + (i + 1) + ' : ' + n.code + ' ' + desc + ' (code en double dans le fichier)'); continue; }
-    vus.add(n.code);
-    const cat = (iCat >= 0 ? (c[iCat] || '').trim() : '') || '0000';
-    const tvaLue = iTva >= 0 ? lireNombre(c[iTva]) : null;
-    if (!CATEGORIES[cat]) {
-      nouvellesCats[cat] = nouvellesCats[cat] || {};
-      const t = tvaLue != null ? tvaLue : 21;
-      nouvellesCats[cat][t] = (nouvellesCats[cat][t] || 0) + 1;
+  const plan = { avecMaj, colonnes: Object.keys(ix), aCreer: [], aMettreAJour: [], rejetes: [], nouvellesCats: {}, ignores: 0, inchanges: 0, lignesLues: 0 };
+  const vus = new Set();
+  for (let i = ent.ligne + 1; i < lignes.length; i++) {
+    const c = lignes[i];
+    const n = lireCodeImport(val(c, 'code'));
+    const desc = String(val(c, 'description') || '').trim();
+    if (!String(val(c, 'code') || '').trim() && !desc) continue;   // ligne vide
+    plan.lignesLues++;
+    if (!n.ok || !desc) { plan.rejetes.push('Ligne ' + (i + 1) + ' : ' + (val(c, 'code') || '?') + ' ' + desc + ' (' + (n.ok ? 'désignation vide' : n.raison) + ')'); continue; }
+    const cle = cleExistante(n.code, existants) || n.code;
+    if (vus.has(cle)) { plan.rejetes.push('Ligne ' + (i + 1) + ' : ' + n.code + ' ' + desc + ' (code en double dans le fichier)'); continue; }
+    vus.add(cle);
+
+    const cat = String(val(c, 'codeRapport') || '').trim().replace(/[.,]0+$/, '') || '0000';
+    let tva = lireNombreImport(val(c, 'tva'));
+    if (tva != null && tva > 0 && tva < 1) tva = Math.round(tva * 100);   // 0,21 (format pourcentage Excel) → 21
+    if (!CATEGORIES[cat] && ix.codeRapport != null) {
+      plan.nouvellesCats[cat] = plan.nouvellesCats[cat] || {};
+      const t = tva != null ? tva : 21;
+      plan.nouvellesCats[cat][t] = (plan.nouvellesCats[cat][t] || 0) + 1;
     }
+    const prix = lireNombreImport(val(c, 'prix'));
+    const consigne = lireNombreImport(val(c, 'consigne'));
     const donnees = {
       description: desc.slice(0, 40),
       codeRapport: cat,
-      tvaPct: tvaLue != null ? tvaLue : (CATEGORIES[cat] ? CATEGORIES[cat].tva : 21),
-      prixVenteTTC: iPrix >= 0 ? lireNombre(c[iPrix]) : null,
-      consigne: iCons >= 0 ? lireNombre(c[iCons]) : null
+      tvaPct: tva != null ? tva : (CATEGORIES[cat] ? CATEGORIES[cat].tva : 21),
+      prixVenteTTC: prix != null ? arrondi(prix, 4) : null,
+      consigne: consigne != null ? arrondi(consigne, 4) : null
     };
-    const ancien = existants.get(n.code);
+    const ancien = existants.get(cle);
     if (!ancien) {
-      aCreer.push(nouvelleFiche(n.code, Object.assign({}, donnees, {
-        stockFuelpos: iStock >= 0 ? lireNombre(c[iStock]) : null
-      }), 'import FuelPOS'));
+      const stock = lireNombreImport(val(c, 'stock'));
+      plan.aCreer.push(Object.assign({ code: n.code }, donnees, { stockFuelpos: stock }));
       continue;
     }
-    if (!avecMaj) { ignores++; continue; }
+    if (!avecMaj) { plan.ignores++; continue; }
     // Seuls les champs présents dans le fichier sont comparés ; stock et prix d'achat ne sont jamais touchés
     const maj = {};
-    const comparer = (champ, actif) => {
-      if (actif && donnees[champ] !== (ancien[champ] == null ? null : ancien[champ])) maj[champ] = donnees[champ];
+    const comparer = (champ, present) => {
+      if (present && donnees[champ] !== (ancien[champ] == null ? null : ancien[champ])) maj[champ] = donnees[champ];
     };
     comparer('description', true);
-    comparer('codeRapport', iCat >= 0);
-    comparer('tvaPct', iTva >= 0);
-    comparer('prixVenteTTC', iPrix >= 0);
-    comparer('consigne', iCons >= 0);
-    if (Object.keys(maj).length) aMettreAJour.push({ code: n.code, maj, avant: ancien });
-    else inchanges++;
+    comparer('codeRapport', ix.codeRapport != null);
+    comparer('tvaPct', ix.tva != null);
+    comparer('prixVenteTTC', ix.prix != null);
+    comparer('consigne', ix.consigne != null);
+    if (Object.keys(maj).length) plan.aMettreAJour.push({ code: cle, maj, avant: ancien });
+    else plan.inchanges++;
   }
+  return plan;
+}
 
-  // Catégories inconnues : créées automatiquement, à renommer ensuite dans Outils
+const NOMS_CHAMPS = { description: 'désignation', codeRapport: 'code rapport', tvaPct: 'TVA', prixVenteTTC: 'prix de vente', consigne: 'consigne' };
+function detailMaj(m) {
+  const f = v => v == null ? '—' : (typeof v === 'number' ? v.toLocaleString('fr-BE', { maximumFractionDigits: 4 }) : v);
+  return m.code + ' ' + (m.maj.description || m.avant.description) + ' : ' + Object.keys(m.maj).map(k =>
+    NOMS_CHAMPS[k] + ' ' + f(m.avant[k]) + ' → ' + f(m.maj[k])).join(', ');
+}
+
+function afficherApercuImport(plan) {
+  let r = 'APERÇU — rien n\'est encore enregistré\n' +
+    'Fichier : ' + plan.fichier + ' (' + plan.lignesLues + ' ligne(s) lue(s))\n' +
+    'Colonnes reconnues : ' + plan.colonnes.join(', ') + '\n\n' +
+    'À créer : ' + plan.aCreer.length + '\n';
+  if (plan.avecMaj) r += 'À mettre à jour : ' + plan.aMettreAJour.length + '\nInchangés : ' + plan.inchanges + '\n';
+  else r += 'Déjà présents (ignorés) : ' + plan.ignores + '\n';
+  r += 'Rejetés : ' + plan.rejetes.length;
+  const cats = Object.keys(plan.nouvellesCats);
+  if (cats.length) r += '\n\nNouvelles catégories à créer : ' + cats.join(', ');
+  if (plan.aCreer.length) r += '\n\nNouveaux produits :\n' + plan.aCreer.slice(0, 30).map(p => p.code + ' ' + p.description + ' (' + p.codeRapport + ')').join('\n') + (plan.aCreer.length > 30 ? '\n…' : '');
+  if (plan.aMettreAJour.length) r += '\n\nMises à jour :\n' + plan.aMettreAJour.slice(0, 50).map(detailMaj).join('\n') + (plan.aMettreAJour.length > 50 ? '\n…' : '');
+  if (plan.rejetes.length) r += '\n\nRejets :\n' + plan.rejetes.join('\n');
+  $('oRapport').textContent = r;
+  $('oRapport').classList.remove('cache');
+  const rienAFaire = !plan.aCreer.length && !plan.aMettreAJour.length;
+  $('oConfirmer').disabled = rienAFaire;
+  $('oValidation').classList.remove('cache');
+  if (rienAFaire) toast('Rien à importer : tout est déjà à jour.');
+}
+
+// ---------- Écriture après confirmation ----------
+async function executerImport(plan) {
+  const FV = firebase.firestore.FieldValue;
+  // Un autre téléphone a pu créer certains produits depuis l'analyse : on ne les écrase pas
+  const existants = new Map();
+  (await db.collection('produits').get({ source: 'server' })).forEach(d => existants.set(d.id, true));
+  const aCreer = plan.aCreer.filter(p => !cleExistante(p.code, existants));
+  const sautes = plan.aCreer.length - aCreer.length;
+
   const lotCat = db.batch();
-  const creees = Object.entries(nouvellesCats).map(([code, tvas]) => {
+  const creees = Object.entries(plan.nouvellesCats).filter(([code]) => !CATEGORIES[code]).map(([code, tvas]) => {
     const tva = Number(Object.entries(tvas).sort((a, b) => b[1] - a[1])[0][0]);
-    lotCat.set(db.collection('categories').doc(code), {
-      nom: 'Code ' + code, court: code, tva,
-      creePar: utilisateur, creeLe: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    lotCat.set(db.collection('categories').doc(code), { nom: 'Code ' + code, court: code, tva, creePar: utilisateur, creeLe: FV.serverTimestamp() });
     return code;
   });
   if (creees.length) await lotCat.commit();
 
   for (let i = 0; i < aCreer.length; i += 400) {
     const lot = db.batch();
-    aCreer.slice(i, i + 400).forEach(p => lot.set(db.collection('produits').doc(p.code), p));
+    aCreer.slice(i, i + 400).forEach(p => {
+      const { code, ...donnees } = p;
+      lot.set(db.collection('produits').doc(code), nouvelleFiche(code, donnees, 'import'));
+    });
     await lot.commit();
   }
-  const FV = firebase.firestore.FieldValue;
-  for (let i = 0; i < aMettreAJour.length; i += 400) {
+  for (let i = 0; i < plan.aMettreAJour.length; i += 400) {
     const lot = db.batch();
-    aMettreAJour.slice(i, i + 400).forEach(m => lot.update(db.collection('produits').doc(m.code),
+    plan.aMettreAJour.slice(i, i + 400).forEach(m => lot.update(db.collection('produits').doc(m.code),
       Object.assign({}, m.maj, { modifiePar: utilisateur, modifieLe: FV.serverTimestamp() })));
     await lot.commit();
   }
 
-  let r = 'Produits créés : ' + aCreer.length;
-  if (avecMaj) r += '\nProduits mis à jour : ' + aMettreAJour.length + '\nInchangés : ' + inchanges;
-  else r += '\nDéjà présents (ignorés) : ' + ignores;
-  r += '\nLignes rejetées : ' + rejetes.length;
+  let r = 'IMPORT TERMINÉ — ' + plan.fichier + '\n\nProduits créés : ' + aCreer.length;
+  if (sautes) r += '\nDéjà créés entre-temps sur l\'autre téléphone (ignorés) : ' + sautes;
+  if (plan.avecMaj) r += '\nProduits mis à jour : ' + plan.aMettreAJour.length + '\nInchangés : ' + plan.inchanges;
+  else r += '\nDéjà présents (ignorés) : ' + plan.ignores;
+  r += '\nLignes rejetées : ' + plan.rejetes.length;
   if (creees.length) r += '\n\nNouvelles catégories créées : ' + creees.join(', ') + '\n→ donnez-leur un nom dans Outils > Catégories.';
-  if (aMettreAJour.length) {
-    r += '\n\nDétail des mises à jour :\n' + aMettreAJour.slice(0, 50).map(m =>
-      m.code + ' ' + (m.maj.description || m.avant.description) + ' : ' + Object.keys(m.maj).map(k => k + ' ' +
-        (m.avant[k] == null ? '—' : m.avant[k]) + ' → ' + (m.maj[k] == null ? '—' : m.maj[k])).join(', ')).join('\n') +
-      (aMettreAJour.length > 50 ? '\n…' : '');
-  }
-  if (rejetes.length) r += '\n\nRejets :\n' + rejetes.join('\n');
+  if (plan.rejetes.length) r += '\n\nRejets :\n' + plan.rejetes.join('\n');
   return r;
 }
 
@@ -1949,7 +2247,8 @@ function guideHTML() {
   '<ul><li><b>Liste déroulante</b> en haut : choisissez un code rapport, par exemple « Tabac (4000) », ou « Tous ».</li>' +
   '<li>En « Tous », les produits sont <b>groupés par code rapport</b> comme sur les listes de la caisse. Chaque titre de groupe indique le nombre de produits, combien sont en stock et leur valeur HT.</li>' +
   '<li><b>Filtres rapides</b> : En stock · Stock 0 · Sans prix d\'achat (produits en stock qui comptent pour 0 € dans l\'inventaire) · Négatif (à recompter).</li>' +
-  '<li>Recherche par nom ou par code-barres ; elle se combine avec le code rapport et le filtre.</li>' +
+  '<li><b>Recherche</b> par nom, par code-barres ou par code rapport (taper 4000 affiche tout le tabac). Elle se combine avec la liste déroulante et le filtre. La croix ✕ vide la case.</li>' +
+  '<li>Si la liste est vide, l\'appli dit pourquoi (code rapport, recherche, filtre) : le bouton <b>Effacer la recherche et les filtres</b> réaffiche tout.</li>' +
   '<li>Chaque ligne : désignation, code-barres et prix de vente TTC à gauche ; stock et prix d\'achat HT (PA) à droite. Stock grisé à 0, rouge s\'il est négatif.</li></ul>' +
   '<p>Le compteur en haut résume la sélection : nombre de produits, nombre en stock, valeur HT. Touchez une ligne pour ouvrir la fiche.</p></details>' +
 
@@ -1962,11 +2261,14 @@ function guideHTML() {
   '<details><summary>9. Catégories (codes rapport)</summary>' +
   '<p>Outils → <b>Catégories</b> : renommez une catégorie, changez son nom abrégé (filtres) ou sa TVA par défaut, ou ajoutez-en une avec son code rapport FuelPOS. La TVA par défaut ne s\'applique qu\'aux nouveaux produits.</p></details>' +
 
-  '<details><summary>10. Importer une liste FuelPOS</summary>' +
-  '<ol><li>Outils → <b>Importer</b>, choisissez le fichier CSV (préparé à partir des listes d\'articles de la caisse).</li>' +
-  '<li>Les articles nouveaux sont créés ; ceux déjà présents sont ignorés.</li>' +
-  '<li>Cochez <b>Mettre à jour les articles existants</b> pour reprendre les désignations, prix de vente, TVA et codes rapport de la caisse. Le stock et les prix d\'achat ne bougent jamais.</li></ol>' +
-  '<p>Un code rapport inconnu crée sa catégorie automatiquement (« Code 5019 ») : donnez-lui un nom dans Catégories.</p></details>' +
+  '<details><summary>10. Importer une liste (Excel ou CSV)</summary>' +
+  '<ol><li>Outils → <b>Importer</b> : choisissez un fichier <b>Excel (.xlsx)</b> ou <b>CSV</b>.</li>' +
+  '<li>Cochez <b>Mettre à jour les articles existants</b> si vous voulez reprendre les désignations, prix de vente, TVA et codes rapport du fichier. Sinon, les articles déjà présents sont ignorés.</li>' +
+  '<li><b>Analyser le fichier</b> : un aperçu montre ce qui sera créé, mis à jour ou rejeté. <b>Rien n\'est encore modifié.</b></li>' +
+  '<li><b>Confirmer l\'import</b> pour enregistrer, ou <b>Annuler</b>.</li></ol>' +
+  '<p>Le fichier doit contenir au moins une colonne de code (PLU, EAN, code-barres…) et une colonne de désignation (description, désignation, libellé…). Colonnes facultatives : code rapport, prix, TVA, consigne, stock. Les lignes de titre au-dessus des colonnes sont ignorées.</p>' +
+  '<p>Le stock et les prix d\'achat ne sont <b>jamais</b> modifiés par un import. Un code rapport inconnu crée sa catégorie (« Code 5019 ») : donnez-lui un nom dans Catégories.</p>' +
+  '<div class="astuce"><b>Attention avec Excel</b> : si on ouvre un CSV dans Excel puis qu\'on l\'enregistre, Excel peut écrire les codes-barres en « 5,41E+12 » (les chiffres sont perdus). L\'appli refuse ces lignes. Solutions : importer le fichier d\'origine sans l\'ouvrir, ou, dans Excel, mettre la colonne des codes au format <b>Texte</b> avant de saisir, et enregistrer en <b>.xlsx</b>.</div></details>' +
 
   '<details><summary>11. Remise à zéro du stock</summary>' +
   '<ol><li>Outils → <b>Remise à zéro</b> : choisissez un code rapport (ou tous).</li>' +
