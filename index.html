@@ -88,6 +88,8 @@ label{display:block;font-size:13px;font-weight:600;color:var(--gris);margin:10px
 .liste .prix{font-weight:600}
 .badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:#e8edf3;color:var(--bleu);margin-left:4px}
 .badge.orange{background:#fdf0e1;color:#9a5a12}
+.badge.gris{background:#eceff1;color:#6b7280}
+.cat-liste li.annulee .desc{opacity:.55}
 .puces{flex-wrap:wrap}
 .liste li.groupe{display:block;cursor:default;background:#eef3fa;border-radius:8px;border-bottom:0;margin-top:12px;padding:8px 10px}
 .liste li.groupe:first-child{margin-top:0}
@@ -297,6 +299,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 
     <!-- Onglet Inventaire -->
     <section id="ongletInventaire" class="cache">
+      <div class="carte no-print" id="icCarte"></div>
       <div class="carte no-print">
         <label class="coche"><input type="checkbox" id="iZero"> Inclure les produits à stock zéro</label>
         <div class="deux">
@@ -348,6 +351,11 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
         <h2>Catégories (codes rapport)</h2>
         <ul class="cat-liste" id="oCategories"></ul>
         <button class="btn second plein" id="oNouvelleCat" style="margin-top:10px">+ Ajouter une catégorie</button>
+      </div>
+      <div class="carte">
+        <h2>Produits retirés du catalogue</h2>
+        <p class="aide" style="margin-top:0">Ils n'apparaissent plus dans le Catalogue, l'Inventaire ni les comptages. Leur historique est conservé.</p>
+        <ul class="cat-liste" id="arListe"><li class="aide">Aucun produit retiré.</li></ul>
       </div>
       <div class="carte">
         <h2>Péremption : seuils d'alerte</h2>
@@ -408,11 +416,18 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.5.0';
+const VERSION = 'v0.5.1';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.5.1', date: '29/10/2026', points: [
+    'Inventaire rapide (onglet Inventaire) : on compte le shop ou un code rapport en scannant, à plusieurs téléphones ; le stock n\'est corrigé qu\'à la clôture, avec le résumé des écarts.',
+    'Sortie de stock avec motif dans la fiche produit : casse, périmé, consommation interne, vol, retour fournisseur… Le total de l\'année par motif apparaît dans l\'Inventaire.',
+    'Retirer un produit du catalogue (fiche → Infos produit) : il disparaît des listes mais reste réactivable (Outils → Produits retirés).',
+    'Plusieurs codes-barres pour un même article : sur l\'écran « Nouveau produit », « C\'est un article déjà dans la liste ? » rattache le nouveau code à la bonne fiche.',
+    'Derniers imports : ✅ pour un import valide, « annulé » en gris pour un import annulé, dates au format belge.'
+  ] },
   { v: 'v0.5.0', date: '29/10/2026', points: [
     'Import des factures d\'achat (Outils) : stock, prix d\'achat, fournisseur, dates de péremption et prix de vente en une fois, à partir d\'un fichier préparé par Claude.',
     'Les produits absents du catalogue sont créés pendant l\'import ; on peut scanner leur code-barres dans l\'aperçu.',
@@ -651,7 +666,7 @@ function cleExistante(code, carte) {
   return null;
 }
 function chercherProduit(code) {
-  const id = cleExistante(code, catalogue);
+  const id = trouverCode(code);
   return id ? catalogue.get(id) : null;
 }
 
@@ -687,6 +702,8 @@ function demarrer() {
       if (desabonnerRemises) { desabonnerRemises(); desabonnerRemises = null; }
       arreterPeremption();
       arreterImports();
+      arreterSortiesEtAlias();
+      arreterComptages();
       afficherConnexion('');
     }
   });
@@ -724,6 +741,8 @@ function afficherAppli() {
   ecouterRemises();
   ecouterPeremption();
   ecouterImports();
+  ecouterSortiesEtAlias();
+  ecouterComptages();
   afficherNouveautesSiBesoin();
 }
 
@@ -780,6 +799,9 @@ function ecouterCatalogue() {
     renderCategoriesOutils();
     renderApercuRZ();
     majResumeFiche();
+    renderArchives();
+    renderCarteComptage();
+    if (sessionComptage) renderEcranComptage();
   }, err => {
     console.error(err);
     toast('Accès au catalogue refusé : ' + err.code, 'ko');
@@ -915,7 +937,8 @@ function traiterCode(brut) {
   }
   const fiche = chercherProduit(n.code);
   if (fiche) {
-    afficherResultat('✓ <b>' + esc(fiche.description) + '</b><br><span class="aide">' + esc(n.code) + ' · stock ' + fmtQte(fiche.stock || 0) + '</span>', 'ok');
+    afficherResultat((fiche.archive ? '⚠️ <b>' + esc(fiche.description) + '</b> est retiré du catalogue' : '✓ <b>' + esc(fiche.description) + '</b>') +
+      '<br><span class="aide">' + esc(n.code) + (n.code !== fiche.code ? ' → ' + esc(fiche.code) : '') + ' · stock ' + fmtQte(fiche.stock || 0) + '</span>', fiche.archive ? 'info' : 'ok');
     ouvrirFiche('modif', fiche);
     return;
   }
@@ -1003,7 +1026,7 @@ function produitsSemblables(desc, codeExclu) {
   if (!a.size) return [];
   const res = [];
   for (const [code, p] of catalogue) {
-    if (code === codeExclu) continue;
+    if (code === codeExclu || p.archive) continue;
     const b = new Set(motsCles(p.description));
     if (!b.size) continue;
     let communs = 0;
@@ -1072,6 +1095,7 @@ async function ouvrirFiche(mode, p) {
       '<div class="tete"><h2>Nouveau produit</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
       '<div class="aide">' + (ficheCourante.code ? 'Code : <b>' + esc(ficheCourante.code) + '</b>' : 'Un code interne sera attribué automatiquement') + '</div>' +
       '<div id="fInfoOFF" class="aide"></div>' +
+      (ficheCourante.code ? blocRattacher() : '') +
       champsProduit(p) +
       '<div class="actions"><button class="btn second" id="fAnnuler">Annuler</button><button class="btn" id="fEnregistrer">Créer le produit</button></div>';
     $('fX').onclick = fermerFiche;
@@ -1080,7 +1104,11 @@ async function ouvrirFiche(mode, p) {
     $('fCat').onchange = () => { const c = CATEGORIES[$('fCat').value]; if (c) $('fTva').value = String(c.tva); };
     let attente = null;
     $('fDesc').oninput = () => { clearTimeout(attente); attente = setTimeout(majSemblables, 300); };
+    $('fSemblables').onclick = e => { const b = e.target.closest('[data-principal]'); if (b) choisirPrincipal(b.dataset.principal); };
     if (ficheCourante.code) {
+      $('rqRecherche').oninput = renderRattacher;
+      $('rqListe').onclick = e => { const li = e.target.closest('[data-principal]'); if (li) choisirPrincipal(li.dataset.principal); };
+      renderRattacher();
       $('fInfoOFF').textContent = 'Recherche dans Open Food Facts…';
       const desc = await chercherOFF(ficheCourante.code);
       if (!ficheCourante || ficheCourante.code !== p.code || ficheCourante.mode !== 'nouveau') return; // fiche fermée entre-temps
@@ -1100,15 +1128,20 @@ async function ouvrirFiche(mode, p) {
   $('fenetre').innerHTML =
     '<div class="tete"><h2 id="fTitre">' + esc(p.description) + '</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
     '<div class="aide">Code : <b>' + esc(p.code) + '</b>' + ' · ' + esc(libCategorie(p.codeRapport || '0000')) + '</div>' +
+    (p.archive ? '<div class="alerte">Ce produit est <b>retiré du catalogue</b>' + (p.archivePar ? ' (par ' + esc(p.archivePar) + (p.archiveLe ? ' le ' + dateTexte(p.archiveLe) : '') + ')' : '') +
+      '. <button class="btn petit" id="frReactiver">Réactiver</button></div>' : '') +
     '<div class="resume" id="fResume"></div>' +
     blocEntree(p) +
     (suiviPeremption(p) || lotsActifs.some(l => l.code === p.code) ? blocPeremption(p) : '') +
     blocComptage() +
+    blocSortie() +
     '<div class="bloc"><h3>Historique</h3><ul class="histo" id="hListe"><li class="aide">Chargement…</li></ul></div>' +
     '<details class="bloc"><summary>Infos produit (désignation, catégorie, prix de vente)</summary>' +
       champsProduit(p) +
       '<div class="meta">' + metaProduit(p) + '</div>' +
       '<div class="actions"><button class="btn" id="fEnregistrer">Enregistrer les infos</button></div>' +
+      blocCodesSecondaires() +
+      (p.archive ? '' : '<button class="btn danger plein" id="frRetirer" style="margin-top:14px">Retirer du catalogue…</button>') +
     '</details>' +
     '<div class="actions"><button class="btn second" id="fAnnuler">Fermer</button></div>';
 
@@ -1128,6 +1161,10 @@ async function ouvrirFiche(mode, p) {
   };
   brancherDate('e');
   brancherPeremptionFiche();
+  $('soOk').onclick = sortirStock;
+  if ($('frRetirer')) $('frRetirer').onclick = retirerDuCatalogue;
+  if ($('frReactiver')) $('frReactiver').onclick = () => reactiverProduit(p.code).then(() => { if (catalogue.has(p.code)) ouvrirFiche('modif', Object.assign({}, catalogue.get(p.code), { archive: false })); });
+  brancherCodesFiche();
   majResumeFiche();
   majCalcul();
   ecouterHistorique(p.code);
@@ -1135,6 +1172,8 @@ async function ouvrirFiche(mode, p) {
 }
 
 function nettoyerFiche() {
+  camRelancer = false;
+  arreterCamComptage();
   if (desabonnerHistorique) { desabonnerHistorique(); desabonnerHistorique = null; }
   historiqueCourant = null;
 }
@@ -1162,8 +1201,9 @@ function majSemblables() {
   const l = produitsSemblables($('fDesc').value, ficheCourante.code);
   $('fSemblables').innerHTML = l.length
     ? '<div class="alerte">Ressemble à un produit existant :<ul>' + l.map(p =>
-        '<li>' + esc(p.description) + ' <span class="aide">(' + esc(p.code) + ')</span></li>').join('') +
-      '</ul>Vérifiez que ce n\'est pas le même article.</div>'
+        '<li>' + esc(p.description) + ' <span class="aide">(' + esc(p.code) + ')</span>' +
+        (ficheCourante.code ? ' <button type="button" class="btn second petit" data-principal="' + esc(p.code) + '">C\'est lui</button>' : '') + '</li>').join('') +
+      '</ul>Vérifiez que ce n\'est pas le même article' + (ficheCourante.code ? ' : si c\'est lui avec un nouveau code-barres, touchez « C\'est lui ».' : '.') + '</div>'
     : '';
 }
 
@@ -1454,12 +1494,14 @@ function renderHistorique() {
       if (det) txt += '<br><span class="aide">' + esc(det) + '</span>';
     } else if (m.type === 'vente') {
       txt = 'Vente shift ' + esc(m.shift) + ' : <b>' + fmtQte(m.quantite) + '</b>' + (m.montantTTC != null ? ' · ' + euro(m.montantTTC) + ' TTC' : '');
+    } else if (m.type === 'sortie') {
+      txt = 'Sortie (' + esc(MOTIFS_SORTIE[m.motif] || m.motif) + ') : <b>' + fmtQte(m.quantite) + '</b>' + (m.valeurHT ? ' · ' + euro(m.valeurHT) + ' HT' : '');
     } else if (m.type === 'perte') {
       txt = 'Retiré (péremption) : <b>' + fmtQte(m.quantite) + '</b> · perte ' + euro(m.valeurHT) + ' HT';
     } else if (m.type === 'remiseZero') {
       txt = 'Remise à zéro : ' + fmtQte(m.stockAvant) + ' → <b>0</b> (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ')';
     } else {
-      txt = 'Comptage : ' + fmtQte(m.stockAvant) + ' → <b>' + fmtQte(m.stockCompte) + '</b> (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ')';
+      txt = (m.sessionComptage ? 'Inventaire rapide : ' : 'Comptage : ') + fmtQte(m.stockAvant) + ' → <b>' + fmtQte(m.stockCompte) + '</b> (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ')';
     }
     const qui = '<span class="aide">' + dateTexte(m.le) + ' · ' + esc(m.par) + (m.annulee ? ' · annulé par ' + esc(m.annuleePar) : '') + '</span>';
     return '<li class="' + (m.annulee ? 'annulee' : '') + '"><div class="desc">' + txt + '<br>' + qui + '</div>' +
@@ -1890,7 +1932,7 @@ async function analyserFacture(lignes) {
     let code = null, nouveau = false, raison = '';
     const n = l.plu ? lireCodeImport(l.plu) : null;
     if (n && n.ok) {
-      code = cleExistante(n.code, catalogue) || n.code;
+      code = trouverCode(n.code) || n.code;
       nouveau = !catalogue.has(code);
     } else if (l.ref && corr.has(l.ref) && catalogue.has(corr.get(l.ref))) {
       code = corr.get(l.ref);
@@ -1933,7 +1975,8 @@ function afficherApercuMv() {
           ? '<span class="badge orange">nouveau</span> ' + esc(x.description) +
             '<br><input type="text" class="cbNouveau" data-i="' + i + '" inputmode="numeric" placeholder="Code-barres (facultatif)" value="' + esc(x.code || '') + '" style="margin-top:4px;padding:6px 8px">' +
             (x.raison ? '<br><span class="aide">' + esc(x.raison) + '</span>' : '')
-          : esc(x.description) + '<br><span class="aide">' + esc(x.code) + (x.ref ? ' · réf. ' + esc(x.ref) : '') + '</span>') +
+          : esc(x.description) + '<br><span class="aide">' + esc(x.code) + (x.ref ? ' · réf. ' + esc(x.ref) : '') + '</span>' +
+            (catalogue.get(x.code) && catalogue.get(x.code).archive ? ' <span class="badge orange">retiré → réactivé</span>' : '')) +
         (x.prixVente != null ? '<br><span class="aide">prix de vente → ' + euro(x.prixVente) + '</span>' : '') +
         (x.remarque ? '<br><span class="aide">⚠️ ' + esc(x.remarque) + '</span>' : '') +
         (x.erreur ? '<br><span class="sansprix">' + esc(x.erreur) + '</span>' : '') + '</td>' +
@@ -1966,7 +2009,7 @@ async function executerFacture(p) {
     if (!v) { x.code = null; return; }
     const n = normaliserCode(v);
     if (!n.ok) throw new Error('code-barres invalide pour ' + x.description + ' : ' + n.raison);
-    const ex = cleExistante(n.code, catalogue);
+    const ex = trouverCode(n.code);
     x.code = ex || n.code;
     x.nouveau = !ex;
     if (ex) x.description = catalogue.get(ex).description;
@@ -2003,6 +2046,7 @@ async function executerFacture(p) {
     });
     const maj = { stock: FV.increment(x.quantite), dernierPrixHT: x.pu, dernierAchatLe: maintenant, dernierFournisseur: p.fournisseur };
     if (x.prixVente != null) { maj.prixVenteTTC = x.prixVente; maj.modifiePar = utilisateur; maj.modifieLe = maintenant; }
+    if (prod.archive) { maj.archive = false; maj.reactivePar = utilisateur; maj.reactiveLe = maintenant; }   // racheté : il revient au catalogue
     lot.update(db.collection('produits').doc(x.code), maj);
     if (x.ref) lot.set(db.collection('correspondances').doc(cleDoc(p.fournisseur) + '__' + cleDoc(x.ref)),
       { fournisseur: cleDoc(p.fournisseur), ref: x.ref, code: x.code, description: x.descriptionFacture, majPar: utilisateur });
@@ -2037,7 +2081,7 @@ async function analyserVentes(lignes) {
     const q = lireNombreImport(l.quantite) || 0;
     const n = lireCodeImport(l.plu);
     if (codesIgn.has(cr) || pluIgn.has(String(l.plu).replace(/^0+/, '')) || pluIgn.has(l.plu)) { plan.ignorees++; return; }
-    const code = n.ok ? cleExistante(n.code, catalogue) : null;
+    const code = n.ok ? trouverCode(n.code) : null;
     if (!code) { plan.inconnues.push(l); return; }
     plan.ventes.push({ shift: l.shift, code, quantite: q, montant });
     s.nb++; s.unites += q; s.montant += montant;
@@ -2080,13 +2124,23 @@ async function executerVentes(p) {
 }
 
 // ---------- Liste des imports et annulation ----------
+// « 2026-10-21 » ou « 21-10-2026 » → « 21/10/2026 »
+function dateBelge(s) {
+  s = String(s || '').trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return m[3].padStart(2, '0') + '/' + m[2].padStart(2, '0') + '/' + m[1];
+  m = s.match(/^(\d{1,2})[-.\/](\d{1,2})[-.\/](\d{2,4})$/);
+  if (m) return m[1].padStart(2, '0') + '/' + m[2].padStart(2, '0') + '/' + (m[3].length === 2 ? '20' + m[3] : m[3]);
+  return s;
+}
 function renderImportsRecents() {
   const ul = $('mvHistorique');
   if (!ul) return;
   const l = facturesRecentes.concat(shiftsRecents).sort((a, b) => ms(b.le) - ms(a.le)).slice(0, 12);
   if (!l.length) { ul.innerHTML = '<li class="aide">Aucun import pour l\'instant.</li>'; return; }
-  ul.innerHTML = l.map(x => '<li><div class="desc"><b>' + (x.genre === 'facture' ? 'Facture ' + esc(x.numero) + ' · ' + esc(x.fournisseur) : 'Shift ' + esc(x.numero)) + '</b><br>' +
-    '<span class="aide">' + (x.date ? esc(x.date) + ' · ' : '') + (x.genre === 'facture' ? x.lignes + ' ligne(s), ' + euro(x.totalHT) + ' HT' : x.articles + ' article(s), ' + euro(x.montantTTC) + ' TTC') +
+  ul.innerHTML = l.map(x => '<li class="' + (x.annulee ? 'annulee' : '') + '"><div class="desc"><b>' + (x.annulee ? '↩️ ' : '✅ ') + (x.genre === 'facture' ? 'Facture ' + esc(x.numero) + ' · ' + esc(x.fournisseur) : 'Shift ' + esc(x.numero)) + '</b>' +
+    (x.annulee ? ' <span class="badge gris">annulé</span>' : '') + '<br>' +
+    '<span class="aide">' + (x.date ? esc(dateBelge(x.date)) + ' · ' : '') + (x.genre === 'facture' ? x.lignes + ' ligne(s), ' + euro(x.totalHT) + ' HT' : x.articles + ' article(s), ' + euro(x.montantTTC) + ' TTC') +
     ' · ' + dateTexte(x.le) + ' · ' + esc(x.par) + (x.annulee ? ' · annulé par ' + esc(x.annuleePar) : '') + '</span></div>' +
     (x.annulee ? '' : '<button class="btn second petit" data-imp="' + esc(x.genre) + ':' + esc(x.id) + '">Annuler</button>') + '</li>').join('');
 }
@@ -2123,6 +2177,537 @@ async function annulerImport2(genre, id) {
 }
 
 // ============================================================
+//  SORTIES DE STOCK, RETRAIT DU CATALOGUE, CODES-BARRES SECONDAIRES
+// ============================================================
+const MOTIFS_SORTIE = {
+  casse: 'Casse / abîmé', perime: 'Périmé', consommation: 'Consommation interne',
+  vol: 'Vol / disparu', retour: 'Retour fournisseur', retrait: 'Retiré du catalogue', autre: 'Autre'
+};
+let sorties = [];
+let aliasMap = new Map();   // code-barres secondaire -> code du produit
+let desabonnerSorties = null, desabonnerAlias = null;
+
+const actif = p => !p.archive;
+
+function ecouterSortiesEtAlias() {
+  if (desabonnerSorties) desabonnerSorties();
+  desabonnerSorties = db.collection('mouvements').where('type', '==', 'sortie').onSnapshot(snap => {
+    sorties = [];
+    snap.forEach(d => sorties.push(d.data({ serverTimestamps: 'estimate' })));
+    renderInventaire();
+  }, err => console.warn('Sorties', err.code));
+  if (desabonnerAlias) desabonnerAlias();
+  desabonnerAlias = db.collection('alias').onSnapshot(snap => {
+    aliasMap = new Map();
+    snap.forEach(d => aliasMap.set(d.id, d.data().code));
+    renderAliasFiche();
+  }, err => console.warn('Codes secondaires', err.code));
+}
+function arreterSortiesEtAlias() {
+  [desabonnerSorties, desabonnerAlias].forEach(f => f && f());
+  desabonnerSorties = desabonnerAlias = null;
+}
+
+// Code scanné → code du produit : code principal, code secondaire ou numéro interne sans ses zéros
+function trouverCode(code) {
+  if (catalogue.has(code)) return code;
+  const a = aliasMap.get(code);
+  if (a && catalogue.has(a)) return a;
+  return cleExistante(code, catalogue);
+}
+
+// ---------- Sortie de stock avec motif ----------
+function blocSortie() {
+  return '<details class="bloc"><summary>Sortie de stock (casse, consommation, vol…)</summary>' +
+    '<div class="deux">' +
+      '<div><label for="soQte">Quantité</label><input type="text" id="soQte" inputmode="decimal" autocomplete="off"></div>' +
+      '<div><label for="soMotif">Motif</label><select id="soMotif">' +
+        Object.entries(MOTIFS_SORTIE).filter(([k]) => k !== 'retrait').map(([k, v]) => '<option value="' + k + '">' + v + '</option>').join('') +
+      '</select></div>' +
+    '</div>' +
+    '<button class="btn second plein" id="soOk" style="margin-top:10px">Sortir du stock</button>' +
+    '<p class="aide">Valorisée au dernier prix d\'achat et comptée dans les sorties de l\'année (onglet Inventaire). Pour un produit périmé avec une date encodée, utilisez plutôt « Jeté » dans Dates de péremption.</p>' +
+  '</details>';
+}
+function mouvementSortie(lot, p, q, motif) {
+  const FV = firebase.firestore.FieldValue;
+  const pu = p.dernierPrixHT != null ? p.dernierPrixHT : 0;
+  const valeur = Math.max(0, arrondi(q * pu, 2));
+  lot.set(db.collection('mouvements').doc(), {
+    type: 'sortie', motif, code: p.code, description: p.description || '',
+    quantite: -q, prixUnitaireHT: pu, valeurHT: valeur,
+    par: utilisateur, le: FV.serverTimestamp(), jour: jourLocal(), annulee: false
+  });
+  lot.update(db.collection('produits').doc(p.code), { stock: FV.increment(-q) });
+  return valeur;
+}
+function sortirStock() {
+  const p = catalogue.get(ficheCourante.code);
+  if (!p) return;
+  const q = lireNombre($('soQte').value);
+  if (!q || q <= 0) { toast('Indiquez la quantité à sortir.', 'warn'); return; }
+  const motif = $('soMotif').value;
+  if (!confirm('Sortir ' + fmtQte(q) + ' unité(s) de « ' + p.description + ' » (' + MOTIFS_SORTIE[motif] + ') ?')) return;
+  const lot = db.batch();
+  const v = mouvementSortie(lot, p, q, motif);
+  lot.commit().catch(e => toast('Sortie refusée : ' + (e.code || e.message), 'ko'));
+  $('soQte').value = '';
+  toast('Sortie enregistrée : −' + fmtQte(q) + (v ? ' (' + euro(v) + ' HT)' : ''));
+}
+
+// ---------- Retrait du catalogue (archivage) ----------
+function retirerDuCatalogue() {
+  const p = catalogue.get(ficheCourante.code);
+  if (!p) return;
+  const st = p.stock || 0;
+  let msg = 'Retirer « ' + p.description + ' » du catalogue ?\n\nIl n\'apparaîtra plus dans le Catalogue, l\'Inventaire ni les comptages. Son historique est conservé et il pourra être réactivé (Outils > Produits retirés).';
+  if (st !== 0) msg += '\n\nLe stock restant (' + fmtQte(st) + ') sera sorti avec le motif « Retiré du catalogue ».';
+  if (!confirm(msg)) return;
+  const FV = firebase.firestore.FieldValue;
+  const lot = db.batch();
+  if (st !== 0) mouvementSortie(lot, p, st, 'retrait');
+  lot.update(db.collection('produits').doc(p.code), { archive: true, archivePar: utilisateur, archiveLe: FV.serverTimestamp() });
+  lot.commit().catch(e => toast('Retrait refusé : ' + (e.code || e.message), 'ko'));
+  fermerFiche();
+  toast('« ' + p.description + ' » retiré du catalogue');
+}
+function reactiverProduit(code) {
+  const FV = firebase.firestore.FieldValue;
+  return db.collection('produits').doc(code).update({ archive: false, reactivePar: utilisateur, reactiveLe: FV.serverTimestamp() })
+    .then(() => toast('Produit réactivé'))
+    .catch(e => toast('Réactivation refusée : ' + (e.code || e.message), 'ko'));
+}
+function renderArchives() {
+  const ul = $('arListe');
+  if (!ul) return;
+  const l = [...catalogue.values()].filter(p => p.archive).sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr'));
+  ul.innerHTML = l.length ? l.map(p => '<li><div class="desc"><b>' + esc(p.description) + '</b> <span class="code">' + esc(p.code) + '</span><br><span class="aide">' +
+    esc(libCategorie(p.codeRapport || '0000')) + (p.archiveLe ? ' · retiré le ' + dateTexte(p.archiveLe) + ' par ' + esc(p.archivePar) : '') + '</span></div>' +
+    '<button class="btn second petit" data-reactiver="' + esc(p.code) + '">Réactiver</button></li>').join('')
+    : '<li class="aide">Aucun produit retiré.</li>';
+}
+$('arListe').addEventListener('click', e => {
+  const b = e.target.closest('[data-reactiver]');
+  if (b) reactiverProduit(b.dataset.reactiver);
+});
+
+// ---------- Codes-barres secondaires ----------
+async function rattacherCode(code, principal) {
+  const p = catalogue.get(principal);
+  if (!p) return false;
+  if (catalogue.has(code)) { toast('Ce code est déjà celui d\'un autre produit.', 'warn'); return false; }
+  if (aliasMap.has(code)) { toast('Ce code est déjà rattaché à « ' + (catalogue.get(aliasMap.get(code)) || {}).description + ' ».', 'warn'); return false; }
+  if (!confirm('Ajouter le code ' + code + ' comme code-barres de « ' + p.description + ' » ?\n\nScanner ce code ouvrira ensuite cette fiche, avec le même stock.')) return false;
+  db.collection('alias').doc(code).set({
+    code: principal, description: p.description, creePar: utilisateur, creeLe: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(e => toast('Ajout refusé : ' + (e.code || e.message), 'ko'));
+  aliasMap.set(code, principal);
+  toast('Code ' + code + ' rattaché à « ' + p.description + ' »');
+  return true;
+}
+function codesSecondaires(principal) {
+  return [...aliasMap].filter(([, c]) => c === principal).map(([a]) => a);
+}
+function blocCodesSecondaires() {
+  return '<label>Autres codes-barres de ce produit</label>' +
+    '<ul class="histo" id="alListe"></ul>' +
+    '<div class="ligne" style="margin-top:6px"><input type="text" id="alCode" inputmode="numeric" autocomplete="off" placeholder="Scanner ou taper un code"><button class="btn second" id="alOk">Ajouter</button></div>';
+}
+function renderAliasFiche() {
+  const ul = $('alListe');
+  if (!ul || !ficheCourante) return;
+  const l = codesSecondaires(ficheCourante.code);
+  ul.innerHTML = l.length ? l.map(c => '<li><div class="desc">' + esc(c) + '</div><button class="btn second petit" data-alias="' + esc(c) + '">Retirer</button></li>').join('')
+    : '<li class="aide">Aucun (le code principal est ' + esc(ficheCourante.code) + ').</li>';
+}
+function brancherCodesFiche() {
+  if (!$('alListe')) return;
+  $('alListe').onclick = e => {
+    const b = e.target.closest('[data-alias]');
+    if (!b) return;
+    if (!confirm('Retirer le code ' + b.dataset.alias + ' de ce produit ?')) return;
+    db.collection('alias').doc(b.dataset.alias).delete().catch(err => toast('Refusé : ' + err.code, 'ko'));
+    aliasMap.delete(b.dataset.alias);
+    renderAliasFiche();
+  };
+  const ajouter = () => {
+    const n = normaliserCode($('alCode').value);
+    if (!n.ok) { toast(n.raison, 'warn'); return; }
+    rattacherCode(n.code, ficheCourante.code).then(ok => { if (ok) { $('alCode').value = ''; renderAliasFiche(); } });
+  };
+  $('alOk').onclick = ajouter;
+  $('alCode').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); ajouter(); } };
+  renderAliasFiche();
+}
+
+// Fiche « Nouveau produit » : rattacher le code scanné à un produit existant
+function blocRattacher() {
+  return '<details class="bloc" id="fRatt"><summary>C\'est un article déjà dans la liste (nouveau code-barres) ?</summary>' +
+    '<input type="search" id="rqRecherche" placeholder="Rechercher le produit (nom ou code)…" autocomplete="off" style="margin-top:8px">' +
+    '<ul class="liste" id="rqListe"></ul></details>';
+}
+function renderRattacher() {
+  const q = normaliserTexte($('rqRecherche').value.trim());
+  if (q.length < 2) { $('rqListe').innerHTML = '<li class="groupe aide">Tapez au moins 2 lettres.</li>'; return; }
+  const l = [...catalogue.values()].filter(actif)
+    .filter(p => normaliserTexte(p.description).includes(q) || String(p.code).includes(q))
+    .sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr')).slice(0, 12);
+  $('rqListe').innerHTML = l.length ? l.map(p => '<li data-principal="' + esc(p.code) + '"><div class="desc"><div class="nom">' + esc(p.description) + '</div>' +
+    '<div class="sous">' + esc(p.code) + ' · ' + esc(libCategorie(p.codeRapport || '0000')) + '</div></div><span class="badge">C\'est lui</span></li>').join('')
+    : '<li class="groupe aide">Aucun produit trouvé.</li>';
+}
+async function choisirPrincipal(principal) {
+  const code = ficheCourante && ficheCourante.code;
+  if (!code) return;
+  if (await rattacherCode(code, principal)) {
+    retirerAttente(code);
+    afficherResultat('✓ Code ' + esc(code) + ' rattaché à <b>' + esc(catalogue.get(principal).description) + '</b>', 'ok');
+    ouvrirFiche('modif', catalogue.get(principal));
+  }
+}
+
+// ============================================================
+//  INVENTAIRE RAPIDE : comptage partagé, le stock n'est modifié qu'à la clôture
+// ============================================================
+let sessionComptage = null;
+let lignesComptage = new Map();          // code produit -> ligne comptée
+let desabonnerSessions = null, desabonnerLignes = null;
+let vueComptage = 'reste';
+let ouvrirApresDemarrage = false;
+let camC = null, camRelancer = false;
+
+function ecouterComptages() {
+  if (desabonnerSessions) desabonnerSessions();
+  desabonnerSessions = db.collection('comptages').where('statut', '==', 'ouvert').onSnapshot(snap => {
+    let s = null;
+    snap.forEach(d => { if (!s) s = Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' })); });
+    const change = (s ? s.id : null) !== (sessionComptage ? sessionComptage.id : null);
+    sessionComptage = s;
+    if (change) ecouterLignesComptage();
+    renderCarteComptage();
+    if (s && ouvrirApresDemarrage) { ouvrirApresDemarrage = false; ouvrirEcranComptage(); }
+  }, err => console.warn('Comptages', err.code));
+}
+function ecouterLignesComptage() {
+  if (desabonnerLignes) { desabonnerLignes(); desabonnerLignes = null; }
+  lignesComptage = new Map();
+  if (!sessionComptage) return;
+  desabonnerLignes = db.collection('comptageLignes').where('session', '==', sessionComptage.id).onSnapshot(snap => {
+    lignesComptage = new Map();
+    snap.forEach(d => { const l = d.data({ serverTimestamps: 'estimate' }); lignesComptage.set(l.code, Object.assign({ id: d.id }, l)); });
+    renderCarteComptage();
+    renderEcranComptage();
+  }, err => console.warn('Lignes de comptage', err.code));
+}
+function arreterComptages() {
+  [desabonnerSessions, desabonnerLignes].forEach(f => f && f());
+  desabonnerSessions = desabonnerLignes = null;
+  sessionComptage = null;
+  lignesComptage = new Map();
+}
+function libelleSession(s) {
+  return s.codeRapport === 'tous' ? 'Tout le shop' : libCategorie(s.codeRapport);
+}
+function produitsSession() {
+  if (!sessionComptage) return [];
+  const c = sessionComptage.codeRapport;
+  return [...catalogue.values()].filter(actif).filter(p => c === 'tous' || (p.codeRapport || '0000') === c);
+}
+
+function renderCarteComptage() {
+  const c = $('icCarte');
+  if (!c) return;
+  if (!sessionComptage) {
+    c.innerHTML = '<h2>Inventaire rapide</h2>' +
+      '<p class="aide" style="margin-top:0">Comptez le shop en scannant les produits. Plusieurs téléphones peuvent compter ensemble ; le stock n\'est modifié qu\'à la clôture.</p>' +
+      '<label for="icCat">Que compter ?</label><select id="icCat"><option value="tous">Tout le shop</option>' +
+      codesRapport().map(cr => '<option value="' + esc(cr) + '">' + esc(libCategorie(cr)) + '</option>').join('') + '</select>' +
+      '<button class="btn plein" id="icDemarrer" style="margin-top:10px">Commencer un comptage</button>';
+    $('icDemarrer').onclick = demarrerComptage;
+    return;
+  }
+  const prods = produitsSession();
+  const comptes = prods.filter(p => lignesComptage.has(p.code)).length;
+  c.innerHTML = '<h2>Comptage en cours : ' + esc(libelleSession(sessionComptage)) + '</h2>' +
+    '<p class="aide" style="margin-top:0">Commencé par ' + esc(sessionComptage.par) + ' le ' + dateTexte(sessionComptage.le) + '</p>' +
+    '<div class="chiffres"><div><span>Comptés</span><b>' + comptes + '</b></div><div><span>Reste à compter</span><b>' + (prods.length - comptes) + '</b></div>' +
+    '<div><span>Lignes</span><b>' + lignesComptage.size + '</b></div></div>' +
+    '<button class="btn plein" id="icCompter">📷 Compter</button>' +
+    '<div class="deux" style="margin-top:8px"><button class="btn second" id="icCloturer">Clôturer…</button><button class="btn second" id="icAbandonner">Abandonner</button></div>';
+  $('icCompter').onclick = ouvrirEcranComptage;
+  $('icCloturer').onclick = ouvrirCloture;
+  $('icAbandonner').onclick = abandonnerComptage;
+}
+
+async function demarrerComptage() {
+  if (!navigator.onLine) { toast('Démarrer un comptage demande une connexion.', 'warn'); return; }
+  ouvrirApresDemarrage = true;
+  try {
+    await db.collection('comptages').add({
+      codeRapport: $('icCat').value, statut: 'ouvert', par: utilisateur, le: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (e) {
+    ouvrirApresDemarrage = false;
+    toast('Impossible de démarrer : ' + (e.code || e.message), 'ko');
+  }
+}
+function abandonnerComptage() {
+  if (!sessionComptage) return;
+  if (!confirm('Abandonner ce comptage ?\n\nLes quantités comptées ne seront pas appliquées et le stock ne change pas.')) return;
+  db.collection('comptages').doc(sessionComptage.id).update({ statut: 'abandonne', cloturePar: utilisateur, clotureLe: firebase.firestore.FieldValue.serverTimestamp() })
+    .catch(e => toast('Refusé : ' + e.code, 'ko'));
+  toast('Comptage abandonné');
+}
+
+// ---------- Écran de comptage ----------
+function ouvrirEcranComptage() {
+  if (!sessionComptage) return;
+  arreterCamera();
+  nettoyerFiche();
+  ficheCourante = null;
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>Comptage — ' + esc(libelleSession(sessionComptage)) + '</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<button class="btn plein" id="icCam">📷 Ouvrir la caméra</button>' +
+    '<div id="icZone" class="cache" style="position:relative;background:#000;border-radius:10px;overflow:hidden;margin-top:10px;aspect-ratio:4/3">' +
+      '<video id="icVideo" playsinline muted style="width:100%;height:100%;object-fit:cover;display:block"></video><div class="viseur" style="position:absolute;left:10%;right:10%;top:38%;height:24%;border:2px solid rgba(255,255,255,.85);border-radius:8px"></div></div>' +
+    '<div class="ligne" style="margin-top:8px"><input type="text" id="icSaisie" inputmode="numeric" autocomplete="off" placeholder="Code-barres / douchette puis Entrée"><button class="btn" id="icOk">OK</button></div>' +
+    '<div id="icProduit"></div>' +
+    '<div class="bascule" id="icVues"><button type="button" data-vue="reste"></button><button type="button" data-vue="comptes"></button></div>' +
+    '<input type="search" id="icFiltre" placeholder="Filtrer la liste…" autocomplete="off" style="margin-top:8px">' +
+    '<ul class="liste" id="icListe"></ul>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  $('icCam').onclick = () => { if (camC) { camRelancer = false; arreterCamComptage(); } else { camRelancer = true; demarrerCamComptage(); } };
+  const valider = () => { const v = $('icSaisie').value; $('icSaisie').value = ''; if (v.trim()) scanComptage(v); };
+  $('icOk').onclick = valider;
+  $('icSaisie').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); valider(); } };
+  $('icVues').onclick = e => { const b = e.target.closest('[data-vue]'); if (b) { vueComptage = b.dataset.vue; renderEcranComptage(); } };
+  $('icFiltre').oninput = renderEcranComptage;
+  $('icListe').onclick = e => {
+    const z = e.target.closest('[data-zero]');
+    if (z) { enregistrerLigne(catalogue.get(z.dataset.zero), 0, 'remplacer'); return; }
+    const li = e.target.closest('li[data-code]');
+    if (li && catalogue.has(li.dataset.code)) afficherProduitComptage(catalogue.get(li.dataset.code));
+  };
+  renderEcranComptage();
+  $('icSaisie').focus();
+}
+
+async function demarrerCamComptage() {
+  if (!('BarcodeDetector' in window)) { toast('Caméra indisponible sur cet appareil : utilisez la saisie ou une douchette.', 'warn'); return; }
+  try {
+    const det = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+    const flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    const v = $('icVideo');
+    if (!v) { flux.getTracks().forEach(t => t.stop()); return; }
+    v.srcObject = flux;
+    await v.play();
+    $('icZone').classList.remove('cache');
+    $('icCam').textContent = '✕ Fermer la caméra';
+    camC = { flux, det, dernier: null, n: 0, occupe: false };
+    camC.boucle = setInterval(async () => {
+      if (!camC || camC.occupe) return;
+      camC.occupe = true;
+      try {
+        const r = await camC.det.detect(v);
+        if (r.length) {
+          const x = r[0].rawValue;
+          if (x === camC.dernier) camC.n++; else { camC.dernier = x; camC.n = 1; }
+          if (camC.n >= 2) {
+            arreterCamComptage();
+            if (navigator.vibrate) navigator.vibrate(80);
+            scanComptage(x);
+          }
+        }
+      } catch (e) { /* image pas prête */ } finally { if (camC) camC.occupe = false; }
+    }, 200);
+  } catch (e) {
+    console.error(e);
+    arreterCamComptage();
+    camRelancer = false;
+    toast('Caméra inaccessible : autorisez-la dans le navigateur.', 'ko');
+  }
+}
+function arreterCamComptage() {
+  if (camC) {
+    clearInterval(camC.boucle);
+    camC.flux.getTracks().forEach(t => t.stop());
+    camC = null;
+  }
+  if ($('icZone')) {
+    $('icZone').classList.add('cache');
+    $('icCam').textContent = '📷 Ouvrir la caméra';
+  }
+}
+
+function scanComptage(brut) {
+  const n = normaliserCode(brut);
+  if (!n.ok) {
+    $('icProduit').innerHTML = '<div class="resultat ko"><b>' + esc(brut) + '</b> : ' + esc(n.raison) + '. Rescannez.</div>';
+    if (navigator.vibrate) navigator.vibrate([60, 60, 60]);
+    if (camRelancer) setTimeout(demarrerCamComptage, 800);
+    return;
+  }
+  const code = trouverCode(n.code);
+  if (!code) {
+    $('icProduit').innerHTML = '<div class="resultat ko">Code <b>' + esc(n.code) + '</b> inconnu. Créez d\'abord le produit (onglet Scanner), ou rattachez ce code à un produit existant, puis recomptez-le.</div>';
+    if (camRelancer) setTimeout(demarrerCamComptage, 1500);
+    return;
+  }
+  afficherProduitComptage(catalogue.get(code));
+}
+
+function afficherProduitComptage(p) {
+  const ligne = lignesComptage.get(p.code);
+  const cr = p.codeRapport || '0000';
+  const hors = sessionComptage.codeRapport !== 'tous' && cr !== sessionComptage.codeRapport;
+  $('icProduit').innerHTML = '<div class="apercu" style="margin-top:10px">' +
+    '<div style="font-size:18px;font-weight:700">' + esc(p.description) + '</div>' +
+    '<span class="aide">' + esc(p.code) + ' · ' + esc(libCategorie(cr)) + ' · stock actuel ' + fmtQte(p.stock || 0) + '</span>' +
+    (p.archive ? '<div class="alerte">Ce produit est retiré du catalogue.</div>' : '') +
+    (hors ? '<div class="alerte">Hors de ce comptage (' + esc(libCategorie(cr)) + ') : il sera quand même compté.</div>' : '') +
+    (ligne ? '<div style="margin-top:6px">Déjà compté : <b>' + fmtQte(ligne.quantite) + '</b> <span class="aide">(' + esc(ligne.majPar || '') + ')</span></div>' : '') +
+    '<label for="icQte">Quantité comptée</label><input type="text" id="icQte" inputmode="decimal" autocomplete="off">' +
+    (ligne
+      ? '<div class="deux" style="margin-top:8px"><button class="btn" id="icAjouter">Ajouter (+)</button><button class="btn second" id="icRemplacer">Remplacer</button></div>'
+      : '<button class="btn plein" id="icValider" style="margin-top:8px">Valider</button>') +
+    '<button class="lien" id="icPasser">Passer</button></div>';
+  const go = mode => enregistrerLigne(p, lireNombre($('icQte').value), mode);
+  if (ligne) { $('icAjouter').onclick = () => go('ajouter'); $('icRemplacer').onclick = () => go('remplacer'); }
+  else $('icValider').onclick = () => go('remplacer');
+  // Entrée : « Ajouter » si déjà compté (même article à un 2e endroit), sinon « Valider »
+  $('icQte').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); go(ligne ? 'ajouter' : 'remplacer'); } };
+  $('icPasser').onclick = () => { $('icProduit').innerHTML = ''; $('icSaisie').focus(); if (camRelancer) demarrerCamComptage(); };
+  $('icQte').focus();
+}
+
+function enregistrerLigne(p, q, mode) {
+  if (!p || !sessionComptage) return;
+  if (q == null || q < 0) { toast('Indiquez la quantité comptée (0 si absent).', 'warn'); return; }
+  const FV = firebase.firestore.FieldValue;
+  const ref = db.collection('comptageLignes').doc(sessionComptage.id + '__' + p.code);
+  const base = { session: sessionComptage.id, code: p.code, description: p.description || '', codeRapport: p.codeRapport || '0000', majPar: utilisateur, majLe: FV.serverTimestamp() };
+  const avant = lignesComptage.get(p.code);
+  const total = mode === 'ajouter' && avant ? arrondi(avant.quantite + q, 3) : q;
+  ref.set(Object.assign(base, { quantite: mode === 'ajouter' && avant ? FV.increment(q) : q }), { merge: true })
+    .catch(e => toast('Comptage refusé : ' + (e.code || e.message), 'ko'));
+  // affichage immédiat (la synchronisation suit)
+  lignesComptage.set(p.code, Object.assign({}, avant || {}, base, { quantite: total }));
+  toast('✓ ' + p.description + ' : ' + fmtQte(total));
+  $('icProduit').innerHTML = '';
+  renderEcranComptage();
+  renderCarteComptage();
+  $('icSaisie').focus();
+  if (camRelancer) demarrerCamComptage();
+}
+
+function renderEcranComptage() {
+  const ul = $('icListe');
+  if (!ul || !sessionComptage) return;
+  const prods = produitsSession();
+  const reste = prods.filter(p => !lignesComptage.has(p.code));
+  const comptes = [...lignesComptage.values()];
+  const b = $('icVues').querySelectorAll('button');
+  b[0].textContent = 'Reste à compter (' + reste.length + ')';
+  b[1].textContent = 'Comptés (' + comptes.length + ')';
+  b[0].classList.toggle('actif', vueComptage === 'reste');
+  b[1].classList.toggle('actif', vueComptage === 'comptes');
+  const f = normaliserTexte($('icFiltre').value.trim());
+  const filtre = x => !f || normaliserTexte(x.description).includes(f) || String(x.code).includes(f);
+  const tri = (a, c) => String(a.description).localeCompare(String(c.description), 'fr', { sensitivity: 'base' });
+  if (vueComptage === 'reste') {
+    const l = reste.filter(filtre).sort(tri);
+    ul.innerHTML = l.length ? l.slice(0, 300).map(p => '<li data-code="' + esc(p.code) + '"><div class="desc"><div class="nom">' + esc(p.description) + '</div>' +
+      '<div class="sous">' + esc(p.code) + ' · stock ' + fmtQte(p.stock || 0) + '</div></div>' +
+      '<button class="btn second petit" data-zero="' + esc(p.code) + '" title="Absent du shop">Mettre à 0</button></li>').join('') +
+      (l.length > 300 ? '<li class="groupe aide">… filtrez pour voir les autres</li>' : '')
+      : '<li class="groupe">' + (reste.length ? 'Aucun produit pour ce filtre.' : '🎉 Tout est compté : vous pouvez clôturer.') + '</li>';
+  } else {
+    const l = comptes.filter(filtre).sort(tri);
+    ul.innerHTML = l.length ? l.map(x => {
+      const p = catalogue.get(x.code) || {};
+      const ecart = arrondi(x.quantite - (p.stock || 0), 3);
+      return '<li data-code="' + esc(x.code) + '"><div class="desc"><div class="nom">' + esc(x.description) + '</div>' +
+        '<div class="sous">stock actuel ' + fmtQte(p.stock || 0) + (ecart ? ' · écart ' + (ecart > 0 ? '+' : '') + fmtQte(ecart) : ' · pas d\'écart') + ' · ' + esc(x.majPar || '') + '</div></div>' +
+        '<div class="droite"><div class="prix">' + fmtQte(x.quantite) + '</div></div></li>';
+    }).join('') : '<li class="groupe aide">Rien de compté pour l\'instant.</li>';
+  }
+}
+
+// ---------- Clôture ----------
+function ouvrirCloture() {
+  if (!sessionComptage) return;
+  arreterCamComptage();
+  ficheCourante = null;
+  const lignes = [...lignesComptage.values()].map(x => {
+    const p = catalogue.get(x.code) || { stock: 0 };
+    return { x, p, avant: p.stock || 0, apres: x.quantite, delta: arrondi(x.quantite - (p.stock || 0), 3), pa: p.dernierPrixHT };
+  });
+  const nonComptes = produitsSession().filter(p => !lignesComptage.has(p.code));
+  const nonComptesStock = nonComptes.filter(p => (p.stock || 0) !== 0);
+  const ecarts = lignes.filter(l => l.delta !== 0).sort((a, b) => Math.abs(b.delta * (b.pa || 0)) - Math.abs(a.delta * (a.pa || 0)));
+  const val = (q, pa) => (q > 0 && pa != null ? q * pa : 0);
+  const vAvant = arrondi(lignes.reduce((s, l) => s + val(l.avant, l.pa), 0), 2);
+  const vApres = arrondi(lignes.reduce((s, l) => s + val(l.apres, l.pa), 0), 2);
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>Clôturer le comptage</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<p class="aide" style="margin-top:0">' + esc(libelleSession(sessionComptage)) + '</p>' +
+    '<div class="chiffres"><div><span>Comptés</span><b>' + lignes.length + '</b></div><div><span>Écarts</span><b>' + ecarts.length + '</b></div><div><span>Non comptés</span><b>' + nonComptes.length + '</b></div></div>' +
+    '<p>Valeur des produits comptés : ' + euro(vAvant) + ' → <b>' + euro(vApres) + ' HT</b></p>' +
+    (ecarts.length ? '<div class="defile"><table class="inv"><thead><tr><th>Produit</th><th class="n">Stock</th><th class="n">Compté</th><th class="n">Écart</th></tr></thead><tbody>' +
+      ecarts.slice(0, 60).map(l => '<tr><td>' + esc(l.x.description) + '</td><td class="n">' + fmtQte(l.avant) + '</td><td class="n">' + fmtQte(l.apres) + '</td><td class="n">' + (l.delta > 0 ? '+' : '') + fmtQte(l.delta) + '</td></tr>').join('') +
+      '</tbody></table></div>' + (ecarts.length > 60 ? '<p class="aide">… et ' + (ecarts.length - 60) + ' autre(s)</p>' : '') : '<p class="aide">Aucun écart.</p>') +
+    (nonComptesStock.length ? '<label class="coche" style="margin-top:12px"><input type="checkbox" id="clZero"> Mettre à 0 les ' + nonComptesStock.length + ' produit(s) non compté(s) qui ont encore du stock</label>' +
+      '<p class="aide" style="margin-top:0">Sinon, ils gardent leur stock actuel.</p>' : '') +
+    '<div class="actions"><button class="btn second" id="clRetour">Continuer à compter</button><button class="btn" id="clOk">Clôturer et mettre à jour le stock</button></div>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  $('clRetour').onclick = ouvrirEcranComptage;
+  $('clOk').onclick = () => executerCloture(lignes, $('clZero') && $('clZero').checked ? nonComptesStock : []);
+}
+
+async function executerCloture(lignes, aZero) {
+  if (!navigator.onLine) { toast('La clôture demande une connexion.', 'warn'); return; }
+  if (!confirm('Mettre à jour le stock de ' + (lignes.length + aZero.length) + ' produit(s) ?')) return;
+  const FV = firebase.firestore.FieldValue;
+  const id = sessionComptage.id;
+  const ops = lignes.map(l => ({ p: l.p, code: l.x.code, desc: l.x.description, compte: l.apres }))
+    .concat(aZero.map(p => ({ p, code: p.code, desc: p.description, compte: 0 })));
+  $('clOk').disabled = true;
+  let ecarts = 0;
+  try {
+    for (let i = 0; i < ops.length; i += 200) {
+      const lot = db.batch();
+      ops.slice(i, i + 200).forEach(o => {
+        const actuel = catalogue.get(o.code);
+        const avant = actuel ? (actuel.stock || 0) : 0;
+        const delta = arrondi(o.compte - avant, 3);
+        if (delta !== 0) {
+          ecarts++;
+          lot.set(db.collection('mouvements').doc(), {
+            type: 'comptage', code: o.code, description: o.desc || '', quantite: delta, stockAvant: avant, stockCompte: o.compte,
+            sessionComptage: id, par: utilisateur, le: FV.serverTimestamp(), jour: jourLocal(), annulee: false
+          });
+          lot.update(db.collection('produits').doc(o.code), { stock: FV.increment(delta), dernierComptageLe: FV.serverTimestamp() });
+        } else {
+          lot.update(db.collection('produits').doc(o.code), { dernierComptageLe: FV.serverTimestamp() });
+        }
+      });
+      await lot.commit();
+    }
+    await db.collection('comptages').doc(id).update({
+      statut: 'cloture', cloturePar: utilisateur, clotureLe: FV.serverTimestamp(), nbComptes: ops.length, nbEcarts: ecarts
+    });
+    fermerFiche();
+    toast('Comptage clôturé : ' + ops.length + ' produit(s), ' + ecarts + ' écart(s) corrigé(s)');
+  } catch (e) {
+    console.error(e);
+    toast('Clôture interrompue : ' + (e.code || e.message), 'ko');
+    if ($('clOk')) $('clOk').disabled = false;
+  }
+}
+
+// ============================================================
 //  CATALOGUE
 // ============================================================
 // Codes rapport présents : catégories connues + codes portés par des produits, dans l'ordre des codes
@@ -2139,10 +2724,11 @@ function renderChoixCategorie() {
   const sel = $('kCat');
   if (!sel) return;
   const compte = {};
-  catalogue.forEach(p => { const c = p.codeRapport || '0000'; compte[c] = (compte[c] || 0) + 1; });
+  let nbActifs = 0;
+  catalogue.forEach(p => { if (p.archive) return; nbActifs++; const c = p.codeRapport || '0000'; compte[c] = (compte[c] || 0) + 1; });
   const codes = codesRapport().filter(c => compte[c] || c !== '0000');
   if (filtreCategorie !== 'tous' && !codes.includes(filtreCategorie)) filtreCategorie = 'tous';
-  sel.innerHTML = '<option value="tous">Tous les codes rapport (' + catalogue.size + ')</option>' +
+  sel.innerHTML = '<option value="tous">Tous les codes rapport (' + nbActifs + ')</option>' +
     codes.map(c => '<option value="' + esc(c) + '">' + esc(libCategorie(c)) + ' — ' + (compte[c] || 0) + ' produit(s)</option>').join('');
   sel.value = filtreCategorie;
 }
@@ -2207,6 +2793,7 @@ function renderCatalogue() {
   // Un code rapport tapé exactement (ex. 4000) affiche cette catégorie, et rien d'autre
   const estCodeRapport = /^\d+$/.test(q) && codesRapport().includes(q);
   const liste = [...catalogue.values()]
+    .filter(actif)
     .filter(p => filtreCategorie === 'tous' || (p.codeRapport || '0000') === filtreCategorie)
     .filter(filtre)
     .filter(p => !q || (estCodeRapport ? (p.codeRapport || '0000') === q
@@ -2257,7 +2844,7 @@ function lignesInventaire(inclureZero) {
       const q = p.stock || 0, pu = p.dernierPrixHT;
       return { p, q, pu, valeur: (pu != null && q > 0) ? arrondi(q * pu, 2) : 0 };
     })
-    .filter(l => inclureZero || l.q !== 0)
+    .filter(l => inclureZero ? (!l.p.archive || l.q !== 0) : l.q !== 0)
     .sort((a, b) => {
       const ca = ordre.indexOf(a.p.codeRapport), cb = ordre.indexOf(b.p.codeRapport);
       return (ca < 0 ? 99 : ca) - (cb < 0 ? 99 : cb) ||
@@ -2340,11 +2927,20 @@ function libCategorie(c) {
 // Pertes pour péremption de l'année en cours (retraits non annulés)
 function lignePertes() {
   const an = String(new Date().getFullYear());
-  const l = pertes.filter(m => !m.annulee && String(m.jour || '').startsWith(an));
-  if (!l.length) return '';
-  const total = arrondi(l.reduce((s, m) => s + (m.valeurHT || 0), 0), 2);
-  return '<p class="aide" style="margin:0 0 6px">Pertes pour péremption en ' + an + ' : <b>' + euro(total) + ' HT</b> (' + l.length + ' retrait(s), ' +
-    fmtQte(l.reduce((s, m) => s + Math.abs(m.quantite), 0)) + ' unité(s)) — déjà sorties du stock.</p>';
+  const deLAnnee = m => !m.annulee && String(m.jour || '').startsWith(an);
+  const groupes = {};
+  const ajouter = (motif, m) => {
+    const g = groupes[motif] = groupes[motif] || { n: 0, q: 0, v: 0 };
+    g.n++; g.q += Math.abs(m.quantite); g.v += m.valeurHT || 0;
+  };
+  pertes.filter(deLAnnee).forEach(m => ajouter('perime', m));
+  sorties.filter(deLAnnee).forEach(m => ajouter(m.motif || 'autre', m));
+  const motifs = Object.keys(MOTIFS_SORTIE).filter(k => groupes[k]);
+  if (!motifs.length) return '';
+  const total = arrondi(motifs.reduce((s, k) => s + groupes[k].v, 0), 2);
+  return '<table class="inv"><thead><tr><th>Sorties de stock ' + an + ' (hors ventes)</th><th class="n">Unités</th><th class="n">Valeur HT</th></tr></thead><tbody>' +
+    motifs.map(k => '<tr><td>' + esc(MOTIFS_SORTIE[k]) + ' <span class="aide">(' + groupes[k].n + ')</span></td><td class="n">' + fmtQte(arrondi(groupes[k].q, 3)) + '</td><td class="n">' + euro(arrondi(groupes[k].v, 2)) + '</td></tr>').join('') +
+    '<tr class="total"><td>Total (déjà sorti du stock)</td><td></td><td class="n">' + euro(total) + '</td></tr></tbody></table>';
 }
 function nomCategorie(c) {
   if (CATEGORIES[c]) return CATEGORIES[c].nom;
@@ -2603,6 +3199,10 @@ async function analyserImport(lignes, avecMaj) {
     if (!String(val(c, 'code') || '').trim() && !desc) continue;   // ligne vide
     plan.lignesLues++;
     if (!n.ok || !desc) { plan.rejetes.push('Ligne ' + (i + 1) + ' : ' + (val(c, 'code') || '?') + ' ' + desc + ' (' + (n.ok ? 'désignation vide' : n.raison) + ')'); continue; }
+    if (!cleExistante(n.code, existants) && aliasMap.has(n.code)) {
+      plan.rejetes.push('Ligne ' + (i + 1) + ' : ' + n.code + ' ' + desc + ' (code secondaire de « ' + ((existants.get(aliasMap.get(n.code)) || {}).description || aliasMap.get(n.code)) + ' », ignoré)');
+      continue;
+    }
     const cle = cleExistante(n.code, existants) || n.code;
     if (vus.has(cle)) { plan.rejetes.push('Ligne ' + (i + 1) + ' : ' + n.code + ' ' + desc + ' (code en double dans le fichier)'); continue; }
     vus.add(cle);
@@ -2750,10 +3350,12 @@ async function sauvegarder(motif) {
   const factures = await lire('factures');
   const shifts = await lire('shifts');
   const correspondances = await lire('correspondances');
+  const alias = await lire('alias');
+  const comptages = await lire('comptages');
   const produits = [...catalogue.entries()].map(([id, p]) => Object.assign({ id }, versJSON(p)));
   const contenu = JSON.stringify({
     application: 'Stock Shop Paliseul', version: VERSION, date: new Date().toISOString(), par: utilisateur,
-    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises, lots, factures, shifts, correspondances
+    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises, lots, factures, shifts, correspondances, alias, comptages
   }, null, 1);
   const heure = new Date().toTimeString().slice(0, 5).replace(':', 'h');
   telecharger('sauvegarde_stock_shop_' + jourLocal() + '_' + heure + '.json', contenu, 'application/json');
@@ -2780,7 +3382,7 @@ function renderCategoriesOutils() {
   const ul = $('oCategories');
   if (!ul) return;
   const compte = {};
-  catalogue.forEach(p => { const c = p.codeRapport || '0000'; compte[c] = (compte[c] || 0) + 1; });
+  catalogue.forEach(p => { if (p.archive) return; const c = p.codeRapport || '0000'; compte[c] = (compte[c] || 0) + 1; });
   // Codes utilisés par des produits mais absents de la liste (ancien import, etc.)
   const codes = new Set(Object.keys(CATEGORIES));
   Object.keys(compte).forEach(c => codes.add(c));
@@ -2985,7 +3587,9 @@ function guideHTML() {
   '<ol><li>Scannez-le : si Open Food Facts le connaît, la désignation est proposée. Vérifiez-la.</li>' +
   '<li>Choisissez la catégorie (le taux de TVA se met tout seul), le prix de vente et la consigne éventuelle.</li>' +
   '<li><b>Créer le produit</b> : la fiche s\'ouvre directement pour encoder la quantité.</li></ol>' +
-  '<p>Si l\'appli affiche « Ressemble à un produit existant », vérifiez que ce n\'est pas le même article avec un autre code.</p>' +
+  '<p><b>Même article, nouveau code-barres ?</b> (le fabricant a changé le code, ou un autre format du même produit est vendu au même prix) : sur l\'écran « Nouveau produit », ouvrez <b>C\'est un article déjà dans la liste ?</b>, cherchez-le par son nom et touchez <b>C\'est lui</b>. Le nouveau code est rattaché à la fiche existante : même stock, même historique, et il sera reconnu au scan, dans les factures et dans les ventes de shift.</p>' +
+  '<p>Si l\'appli affiche « Ressemble à un produit existant », vérifiez que ce n\'est pas le même article : si c\'est lui, touchez <b>C\'est lui</b>.</p>' +
+  '<p>Les codes rattachés se voient (et se retirent) dans la fiche → Infos produit → « Autres codes-barres de ce produit ». On peut aussi y ajouter un code directement.</p>' +
   '<p>Si l\'autre téléphone vient de créer le même produit, vous voyez « Déjà créé par … » et sa fiche s\'ouvre : rien n\'est créé en double.</p>' +
   '<p>Produit sans code-barres : bouton <b>Produit sans code-barres</b> dans Scanner, un numéro interne est attribué.</p></details>' +
 
@@ -2998,7 +3602,20 @@ function guideHTML() {
   '<div class="astuce">Hors ligne (réserve, chambre froide), l\'entrée est gardée dans le téléphone et envoyée dès le retour du réseau.</div></details>' +
 
   '<details><summary>5. Compter et corriger le stock</summary>' +
-  '<p>Dans la fiche produit, partie <b>Comptage</b> : tapez la quantité réellement présente (rayon + réserve) puis <b>Corriger le stock</b>. L\'écart est enregistré dans l\'historique.</p></details>' +
+  '<p><b>Un seul produit</b> : dans sa fiche, partie <b>Comptage</b>, tapez la quantité réellement présente (rayon + réserve) puis <b>Corriger le stock</b>. L\'écart est enregistré dans l\'historique.</p>' +
+  '<p><b>Inventaire rapide</b> (tout le shop ou un code rapport) : onglet <b>Inventaire</b> → carte « Inventaire rapide ».</p>' +
+  '<ol><li>Choisissez quoi compter (« Tout le shop » ou un code rapport) → <b>Commencer un comptage</b>.</li>' +
+  '<li>Scannez un produit (caméra ou douchette) : son nom s\'affiche en grand. Tapez la quantité et <b>Valider</b> (ou Entrée). La caméra se relance pour le produit suivant.</li>' +
+  '<li>Un produit déjà compté (par exemple en rayon puis en réserve) : <b>Ajouter (+)</b> additionne, <b>Remplacer</b> corrige.</li>' +
+  '<li>La liste <b>Reste à compter</b> montre ce qui n\'a pas encore été scanné. Un produit absent du shop : <b>Mettre à 0</b>. Touchez une ligne pour la compter sans scanner (articles sans code-barres).</li>' +
+  '<li><b>Clôturer…</b> : résumé des écarts et de la valeur avant/après. Vous pouvez choisir de mettre à 0 les produits non comptés. Après confirmation, le stock est corrigé : chaque écart apparaît dans l\'historique du produit (« Inventaire rapide »).</li></ol>' +
+  '<div class="astuce">Morgane et Martine peuvent compter en même temps, chacune sur son téléphone : elles voient les produits comptés par l\'autre. Le stock ne change qu\'à la clôture ; « Abandonner » ne modifie rien. Faites ce comptage hors des heures de vente, ou importez les ventes du shift ensuite.</div></details>' +
+
+  '<details><summary>5 bis. Sortir du stock (casse, consommation, vol…) et retirer un produit</summary>' +
+  '<p><b>Sortie de stock</b> : fiche du produit → <b>Sortie de stock</b> → quantité et motif (casse / abîmé, périmé, consommation interne, vol / disparu, retour fournisseur, autre) → <b>Sortir du stock</b>. La sortie est valorisée au dernier prix d\'achat et apparaît dans l\'historique (annulable).</p>' +
+  '<p>Le total de l\'année par motif est affiché dans l\'onglet <b>Inventaire</b>. Pour un produit périmé dont la date a été encodée, utilisez plutôt « Jeté » dans Dates de péremption.</p>' +
+  '<p><b>Retirer un produit du catalogue</b> (plus vendu, fiche créée par erreur) : fiche → Infos produit → <b>Retirer du catalogue…</b>. S\'il reste du stock, il est d\'abord sorti (motif « Retiré du catalogue »). Le produit n\'apparaît plus dans le Catalogue, l\'Inventaire ni les comptages ; son historique est gardé.</p>' +
+  '<p>Pour le remettre : Outils → <b>Produits retirés du catalogue</b> → Réactiver, ou scannez-le et touchez Réactiver dans sa fiche. Une facture d\'achat qui le contient le réactive automatiquement.</p></details>' +
 
   '<details><summary>6. Dates de péremption</summary>' +
   '<p>Le suivi est actif pour l\'alimentation, les glaces, les boissons et les bières. Il se règle par catégorie (Outils → Catégories) ou par produit (fiche → Infos produit).</p>' +
@@ -3012,7 +3629,7 @@ function guideHTML() {
   '<div class="astuce">Annuler une entrée annule aussi sa date ; annuler un retrait (« Jeté ») dans l\'historique remet le lot et le stock comme avant.</div></details>' +
 
   '<details><summary>7. Historique et annulation</summary>' +
-  '<p>Chaque fiche montre les entrées, comptages et remises à zéro, avec qui et quand. <b>Annuler</b> barre la ligne et corrige le stock : rien n\'est jamais effacé.</p></details>' +
+  '<p>Chaque fiche montre les entrées, ventes, sorties, comptages et remises à zéro, avec qui et quand. <b>Annuler</b> barre la ligne et corrige le stock : rien n\'est jamais effacé.</p></details>' +
 
   '<details><summary>8. Catalogue</summary>' +
   '<ul><li><b>Liste déroulante</b> en haut : choisissez un code rapport, par exemple « Tabac (4000) », ou « Tous ».</li>' +
@@ -3027,7 +3644,9 @@ function guideHTML() {
   '<p>L\'onglet <b>Inventaire</b> calcule à tout moment la valeur du stock : quantité × dernier prix d\'achat HT, avec la répartition par taux de TVA et le détail par catégorie.</p>' +
   '<ul><li><b>Imprimer / PDF</b> : relevé avec en-tête de la société et lignes de signature.</li>' +
   '<li><b>Exporter (CSV)</b> : pour Excel ou le comptable.</li>' +
-  '<li>Les produits en stock <b>sans prix d\'achat</b> comptent pour 0 € et sont signalés : encodez une entrée pour leur donner un prix.</li></ul></details>' +
+  '<li>Les produits en stock <b>sans prix d\'achat</b> comptent pour 0 € et sont signalés : encodez une entrée pour leur donner un prix.</li>' +
+  '<li>Le tableau <b>Sorties de stock</b> de l\'année (périmés, casse, consommation interne, vol…) donne les unités et la valeur HT par motif.</li>' +
+  '<li>En haut de l\'onglet : la carte <b>Inventaire rapide</b> pour compter le shop (voir rubrique 5). Elle n\'est pas imprimée.</li></ul></details>' +
 
   '<details><summary>10. Catégories (codes rapport)</summary>' +
   '<p>Outils → <b>Catégories</b> : renommez une catégorie, changez son nom abrégé (filtres) ou sa TVA par défaut, ou ajoutez-en une avec son code rapport FuelPOS. La TVA par défaut ne s\'applique qu\'aux nouveaux produits.</p></details>' +
@@ -3050,6 +3669,7 @@ function guideHTML() {
   '<li><b>Confirmer l\'import</b> : le stock, le prix d\'achat, le fournisseur, les dates de péremption et les prix de vente sont mis à jour.</li></ol>' +
   '<p>L\'appli retient la correspondance « référence du fournisseur → produit » pour les factures suivantes.</p>' +
   '<p><b>Ventes de shift</b> : même principe, chaque vente diminue le stock. Les lignes de carburant, de loterie, de cautions et le café sont ignorées ; la liste se règle dans Outils → « Ventes de shift : lignes ignorées ». Les totaux par code rapport sont contrôlés.</p>' +
+  '<p>Dans <b>Derniers imports</b> : ✅ = import enregistré ; ↩️ et « annulé » en gris = import annulé (on peut alors le réimporter). La date du document est au format jour/mois/année.</p>' +
   '<div class="astuce">Une même facture (fournisseur + n°) ou un même shift ne peut être importé qu\'une fois. En cas d\'erreur, <b>Annuler</b> dans « Derniers imports » annule toutes ses lignes et corrige le stock. Il faut avoir fait le <b>comptage de départ</b> avant d\'importer des ventes, sinon les stocks deviennent négatifs.</div></details>' +
 
   '<details><summary>13. Remise à zéro du stock</summary>' +
@@ -3064,7 +3684,8 @@ function guideHTML() {
 
   '<details><summary>15. Questions fréquentes</summary>' +
   '<p><b>La caméra ne s\'ouvre pas ?</b> Autorisez la caméra pour le site dans Chrome (cadenas à gauche de l\'adresse).</p>' +
-  '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres. Créez la nouvelle fiche ; l\'ancienne restera à stock 0.</p>' +
+  '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres : sur l\'écran « Nouveau produit », utilisez « C\'est un article déjà dans la liste ? » pour rattacher le nouveau code (rubrique 3).</p>' +
+  '<p><b>Un produit a disparu du Catalogue ?</b> Il a peut-être été retiré : Outils → Produits retirés du catalogue.</p>' +
   '<p><b>L\'appli ne montre pas la dernière version ?</b> Fermez-la complètement et rouvrez-la. Le numéro de version est en haut à côté du titre.</p>' +
   '<p><b>Le stock d\'un produit est négatif ?</b> Faites un comptage pour le corriger.</p></details>' +
 
