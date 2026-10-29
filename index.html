@@ -184,6 +184,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 .guide p,.guide li{margin:6px 0;line-height:1.45}
 .guide ul,.guide ol{padding-left:20px;margin:6px 0 10px}
 .guide .astuce{background:#eef3fa;border-radius:8px;padding:8px 10px;font-size:14px;margin:8px 0 10px}
+.guide-impr{display:none}
 .nouv h3{font-size:15px;margin:14px 0 4px}
 .nouv ul{padding-left:20px;margin:4px 0}
 .nouv li{margin:4px 0}
@@ -201,6 +202,19 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
   table.inv tr.cat td{background:#eee}
   .signature{display:block}
   .defile{overflow:visible}
+  /* Impression du mode d'emploi : seule la fenêtre du guide, toutes rubriques dépliées */
+  body.impr-guide>*:not(#fond){display:none!important}
+  body.impr-guide #fond{display:block!important;position:static;background:none}
+  body.impr-guide #fenetre{max-width:none;max-height:none;overflow:visible;border-radius:0;padding:0;box-shadow:none}
+  body.impr-guide #fenetre .tete,body.impr-guide #fenetre .actions,body.impr-guide .histo-versions,body.impr-guide .no-print{display:none!important}
+  body.impr-guide .guide-impr{display:block;border-bottom:2px solid #000;margin-bottom:8px;padding-bottom:6px}
+  body.impr-guide .guide-impr h1{font-size:18px;margin:0}
+  body.impr-guide .guide{font-size:11.5px}
+  body.impr-guide .guide details{border:0;border-top:1px solid #999;border-radius:0;padding:0;margin-top:10px;page-break-inside:avoid}
+  body.impr-guide .guide summary{font-size:13px;list-style:none;padding:6px 0 2px}
+  body.impr-guide .guide summary::-webkit-details-marker{display:none}
+  body.impr-guide .guide details[open] summary{border-bottom:0;margin-bottom:0}
+  body.impr-guide .guide .astuce{background:none;border:1px solid #999;font-size:11px}
 }
 </style>
 </head>
@@ -437,11 +451,14 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.5.3';
+const VERSION = 'v0.5.4';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.5.4', date: '29/10/2026', points: [
+    'Mode d\'emploi imprimable : bouton « Imprimer / PDF » en haut du mode d\'emploi, toutes les rubriques dépliées, toujours à jour avec la version de l\'appli.'
+  ] },
   { v: 'v0.5.3', date: '29/10/2026', points: [
     'Inventaire arrêté (onglet Inventaire) : stock et valeur calculés à une date passée (ex. 31/12), même plusieurs jours après, puis enregistrés et réimprimables les années suivantes.',
     'Restaurer une sauvegarde (Outils) : stocks, prix d\'achat, fiches, catégories et codes secondaires remis comme dans le fichier, avec aperçu et confirmation.',
@@ -4298,6 +4315,10 @@ function guideHTML() {
   '<li>Les produits créés après la sauvegarde sont gardés tels quels.</li>' +
   '<li>Rien n\'est effacé : chaque écart de stock apparaît dans l\'historique du produit (« Restauration »), annulable. Une sauvegarde de l\'état actuel est téléchargée juste avant.</li></ul></details>' +
 
+  '<details><summary>14 bis. Imprimer ce mode d\'emploi</summary>' +
+  '<p>Bouton <b>🖨 Imprimer / PDF</b> en haut du mode d\'emploi : toutes les rubriques sont imprimées dépliées, sans les boutons de l\'appli. Sur le téléphone, choisissez l\'imprimante ou <b>Enregistrer en PDF</b>.</p>' +
+  '<p>Le mode d\'emploi est mis à jour avec chaque nouvelle version de l\'appli : la version et la date d\'impression figurent en haut de la page. Réimprimez-le après une mise à jour.</p></details>' +
+
   '<details><summary>15. Questions fréquentes</summary>' +
   '<p><b>La caméra ne s\'ouvre pas ?</b> Autorisez la caméra pour le site dans Chrome (cadenas à gauche de l\'adresse).</p>' +
   '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres : sur l\'écran « Nouveau produit », utilisez « C\'est un article déjà dans la liste ? » pour rattacher le nouveau code (rubrique 3).</p>' +
@@ -4306,7 +4327,7 @@ function guideHTML() {
   '<p><b>L\'appli ne montre pas la dernière version ?</b> Fermez-la complètement et rouvrez-la. Le numéro de version est en haut à côté du titre.</p>' +
   '<p><b>Le stock d\'un produit est négatif ?</b> C\'est impossible en réalité : une vente a été importée avant la facture, le comptage de départ était faux, ou une quantité a été retirée deux fois. Faites un comptage pour le corriger. L\'appli prévient avant une sortie, une annulation ou une suppression qui rendrait un stock négatif (pas pour les ventes de shift, qui passent telles quelles).</p></details>' +
 
-  '<details><summary>Historique des versions</summary><div class="nouv">' + nouveautesHTML(NOUVEAUTES) + '</div></details>' +
+  '<details class="histo-versions"><summary>Historique des versions</summary><div class="nouv">' + nouveautesHTML(NOUVEAUTES) + '</div></details>' +
   '<p class="aide" style="margin-top:12px">Version ' + VERSION + '</p>' +
   '</div>';
 }
@@ -4320,11 +4341,30 @@ function ouvrirGuide() {
   nettoyerFiche();
   ficheCourante = null;
   $('fenetre').innerHTML = '<div class="tete"><h2>Mode d\'emploi</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<button class="btn second plein no-print" id="gImprimer" style="margin-bottom:8px">🖨 Imprimer / PDF</button>' +
+    '<div class="guide-impr"><h1>Stock Shop Paliseul — Mode d\'emploi</h1>' +
+      '<div>' + esc(ENTREPRISE[0] || '') + ' · version ' + VERSION + ' · imprimé le ' + new Date().toLocaleDateString('fr-BE') + '</div></div>' +
     guideHTML() + '<div class="actions"><button class="btn second" id="fAnnuler">Fermer</button></div>';
   $('fond').classList.remove('cache');
   $('fX').onclick = fermerFiche;
   $('fAnnuler').onclick = fermerFiche;
+  $('gImprimer').onclick = imprimerGuide;
   $('fenetre').scrollTop = 0;
+}
+
+// Impression du guide : toujours la version en cours (le texte vient de guideHTML, mis à jour à chaque version)
+function imprimerGuide() {
+  const fermes = [...document.querySelectorAll('#fenetre .guide details:not(.histo-versions)')].filter(d => !d.open);
+  fermes.forEach(d => { d.open = true; });
+  document.body.classList.add('impr-guide');
+  const fin = () => {
+    document.body.classList.remove('impr-guide');
+    fermes.forEach(d => { d.open = false; });
+    window.removeEventListener('afterprint', fin);
+  };
+  window.addEventListener('afterprint', fin);
+  window.print();
+  setTimeout(() => { if (document.body.classList.contains('impr-guide')) fin(); }, 1500);
 }
 
 // Montre les nouveautés des versions pas encore vues sur ce téléphone
