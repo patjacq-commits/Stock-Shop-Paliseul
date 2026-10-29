@@ -310,6 +310,28 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
     <!-- Onglet Outils -->
     <section id="ongletOutils" class="cache">
       <div class="carte">
+        <h2>Importer une facture ou des ventes de shift</h2>
+        <p class="aide">Fichier préparé par Claude à partir d'une facture d'achat (avec les dates de péremption écrites à la main) ou d'une feuille de shift.</p>
+        <input type="file" id="mvFichier" accept=".csv,.txt,.xlsx,text/csv" style="margin-top:10px">
+        <button class="btn plein" id="mvAnalyser" style="margin-top:10px">Analyser le fichier</button>
+        <div id="mvApercu" style="margin-top:10px"></div>
+        <div class="deux cache" id="mvValidation" style="margin-top:10px">
+          <button class="btn second" id="mvAnnuler">Annuler</button>
+          <button class="btn" id="mvConfirmer">Confirmer l'import</button>
+        </div>
+        <h3 style="font-size:14px;margin:16px 0 4px">Derniers imports</h3>
+        <ul class="cat-liste" id="mvHistorique"><li class="aide">Aucun import pour l'instant.</li></ul>
+      </div>
+      <div class="carte">
+        <h2>Ventes de shift : lignes ignorées</h2>
+        <label for="vIgnCodes">Codes rapport non suivis</label>
+        <input type="text" id="vIgnCodes" autocomplete="off">
+        <label for="vIgnPlu">PLU non suivis</label>
+        <input type="text" id="vIgnPlu" autocomplete="off">
+        <button class="btn second plein" id="vIgnOk" style="margin-top:10px">Enregistrer</button>
+        <p class="aide">Ces lignes ne modifient pas le stock (carburant, loterie, cautions, café…). Séparez par des virgules.</p>
+      </div>
+      <div class="carte">
         <h2>Importer un catalogue (CSV)</h2>
         <p class="aide">Fichier <b>Excel (.xlsx)</b> ou <b>CSV</b> avec au moins une colonne de code (PLU, EAN…) et une colonne de désignation. Un aperçu s'affiche avant toute modification.</p>
         <input type="file" id="oFichier" accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="margin-top:10px">
@@ -386,11 +408,19 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.4.0';
+const VERSION = 'v0.5.0';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.5.0', date: '29/10/2026', points: [
+    'Import des factures d\'achat (Outils) : stock, prix d\'achat, fournisseur, dates de péremption et prix de vente en une fois, à partir d\'un fichier préparé par Claude.',
+    'Les produits absents du catalogue sont créés pendant l\'import ; on peut scanner leur code-barres dans l\'aperçu.',
+    'L\'appli retient la correspondance entre la référence du fournisseur et le produit.',
+    'Import des ventes de shift : le stock diminue ; carburant, loterie, cautions et café sont ignorés (réglable).',
+    'Contrôle des totaux avant confirmation, refus d\'importer deux fois la même facture ou le même shift, et annulation en un clic.',
+    'L\'emplacement des dates de péremption est supprimé.'
+  ] },
   { v: 'v0.4.0', date: '28/10/2026', points: [
     'Dates de péremption : champ date (jour précis ou mois/année) et emplacement dans « Encoder une entrée ».',
     'Fiche produit : section « Dates de péremption » avec Épuisé, Jeté (perte enregistrée) et Promo, et ajout d\'une date pour le stock déjà en rayon.',
@@ -656,6 +686,7 @@ function demarrer() {
       if (desabonnerCategories) { desabonnerCategories(); desabonnerCategories = null; }
       if (desabonnerRemises) { desabonnerRemises(); desabonnerRemises = null; }
       arreterPeremption();
+      arreterImports();
       afficherConnexion('');
     }
   });
@@ -692,6 +723,7 @@ function afficherAppli() {
   ecouterCatalogue();
   ecouterRemises();
   ecouterPeremption();
+  ecouterImports();
   afficherNouveautesSiBesoin();
 }
 
@@ -1337,7 +1369,7 @@ function ajouterEntree() {
   let refLotPer = null;
   if (datePer) {
     refLotPer = db.collection('lots').doc();
-    lot.set(refLotPer, nouveauLot(code, p, datePer, c.qte, $('eEmp').value, 'entree'));
+    lot.set(refLotPer, nouveauLot(code, p, datePer, c.qte, 'entree'));
   }
   lot.set(db.collection('mouvements').doc(), {
     type: 'entree', code, description: p.description || '', lotPeremption: refLotPer ? refLotPer.id : null,
@@ -1420,6 +1452,8 @@ function renderHistorique() {
       if (m.modeSaisie === 'carton') txt += ' <span class="aide">(' + fmtQte(m.cartons) + ' carton(s) de ' + fmtQte(m.uniteParCarton) + ')</span>';
       const det = [m.fournisseur, m.facture ? 'fact. ' + m.facture : ''].filter(Boolean).join(' · ');
       if (det) txt += '<br><span class="aide">' + esc(det) + '</span>';
+    } else if (m.type === 'vente') {
+      txt = 'Vente shift ' + esc(m.shift) + ' : <b>' + fmtQte(m.quantite) + '</b>' + (m.montantTTC != null ? ' · ' + euro(m.montantTTC) + ' TTC' : '');
     } else if (m.type === 'perte') {
       txt = 'Retiré (péremption) : <b>' + fmtQte(m.quantite) + '</b> · perte ' + euro(m.valeurHT) + ' HT';
     } else if (m.type === 'remiseZero') {
@@ -1460,8 +1494,6 @@ function annulerMouvement(id) {
 //  PÉREMPTION : lots datés, alertes, retraits
 //  Un « lot » = une quantité d'un produit avec une même date (souvent une livraison).
 // ============================================================
-const EMPLACEMENTS = ['Rayon', 'Frigo', 'Congélateur', 'Réserve', 'Comptoir'];
-const CLE_EMPLACEMENT = 'stockshop_emplacement';
 const CLE_BANDEAU = 'stockshop_bandeau_ferme';
 let lotsActifs = [];
 let desabonnerLots = null, desabonnerSeuils = null, desabonnerPertes = null;
@@ -1499,15 +1531,10 @@ function dateLot(l) {
 }
 
 // Champs de saisie d'une date (préfixe « e » pour l'entrée, « a » pour l'ajout manuel)
-function optionsEmplacement() {
-  const dernier = lireLocal(CLE_EMPLACEMENT, '');
-  return '<option value="">—</option>' + EMPLACEMENTS.map(e => '<option' + (e === dernier ? ' selected' : '') + '>' + e + '</option>').join('');
-}
 function champsDate(px, avecQte) {
-  return '<div class="' + (avecQte ? 'trois' : 'deux') + '">' +
+  return '<div class="deux">' +
     '<div><label for="' + px + 'Date">Péremption</label><input type="date" id="' + px + 'Date"></div>' +
-    (avecQte ? '<div><label for="' + px + 'Qte">Quantité</label><input type="text" id="' + px + 'Qte" inputmode="decimal" autocomplete="off"></div>' : '') +
-    '<div><label for="' + px + 'Emp">Emplacement</label><select id="' + px + 'Emp">' + optionsEmplacement() + '</select></div>' +
+    (avecQte ? '<div><label for="' + px + 'Qte">Quantité</label><input type="text" id="' + px + 'Qte" inputmode="decimal" autocomplete="off"></div>' : '<div></div>') +
     '</div>' +
     '<label class="coche" style="margin-top:6px"><input type="checkbox" id="' + px + 'Mois"> Mois et année seulement (« à consommer de préférence avant fin… »)</label>';
 }
@@ -1525,13 +1552,12 @@ function lireDate(px) {
   }
   return { peremption: v, precision: 'jour' };
 }
-function nouveauLot(code, p, d, quantite, emplacement, source) {
+function nouveauLot(code, p, d, quantite, source) {
   const FV = firebase.firestore.FieldValue;
-  if (emplacement) ecrireLocal(CLE_EMPLACEMENT, emplacement);
   return {
     code, description: p.description || '', codeRapport: p.codeRapport || '0000',
     peremption: d.peremption, precision: d.precision, quantite, quantiteInitiale: quantite,
-    emplacement: emplacement || null, promo: false, statut: 'actif', source,
+    promo: false, statut: 'actif', source,
     creePar: utilisateur, creeLe: FV.serverTimestamp()
   };
 }
@@ -1620,7 +1646,7 @@ function renderPeremption() {
   ul.innerHTML = liste.map(l => {
     const n = niveauLot(l);
     return '<li data-code="' + esc(l.code) + '"><div class="desc"><div class="nom">' + esc(l.description) + '</div>' +
-      '<div class="sous">' + dateLot(l) + ' · ' + fmtQte(l.quantite) + ' u.' + (l.emplacement ? ' · ' + esc(l.emplacement) : '') +
+      '<div class="sous">' + dateLot(l) + ' · ' + fmtQte(l.quantite) + ' u.' +
       ' · ' + esc(libCategorie(l.codeRapport)) + (l.promo ? '<span class="badge">promo</span>' : '') + '</div></div>' +
       '<div class="droite"><span class="echeance ' + n + '">' + texteEcheance(l) + '</span></div></li>';
   }).join('');
@@ -1660,7 +1686,7 @@ function renderLotsFiche() {
   const l = lotsActifs.filter(x => x.code === ficheCourante.code);
   if (!l.length) { ul.innerHTML = '<li class="aide">Aucune date en cours pour ce produit.</li>'; return; }
   ul.innerHTML = l.map(x => '<li><div class="desc"><span class="echeance ' + niveauLot(x) + '">' + texteEcheance(x) + '</span> ' +
-    '<b>' + dateLot(x) + '</b> · ' + fmtQte(x.quantite) + ' u.' + (x.emplacement ? ' · ' + esc(x.emplacement) : '') +
+    '<b>' + dateLot(x) + '</b> · ' + fmtQte(x.quantite) + ' u.' +
     (x.promo ? ' <span class="badge">promo</span>' : '') + '</div>' +
     '<button class="btn second petit" data-lot="' + esc(x.id) + '" data-act="epuise" title="Tout a été vendu">Épuisé</button>' +
     '<button class="btn second petit" data-lot="' + esc(x.id) + '" data-act="jete" title="Retiré du rayon et jeté">Jeté</button>' +
@@ -1681,7 +1707,7 @@ function brancherPeremptionFiche() {
     if (!d) { toast('Indiquez la date de péremption.', 'warn'); return; }
     if (!q || q <= 0) { toast('Indiquez la quantité concernée.', 'warn'); return; }
     if (joursRestants(d.peremption) < 0 && !confirm('Cette date est déjà dépassée. Ajouter quand même ?')) return;
-    db.collection('lots').add(nouveauLot(code, p, d, q, $('aEmp').value, 'manuel'))
+    db.collection('lots').add(nouveauLot(code, p, d, q, 'manuel'))
       .catch(e => toast('Ajout refusé : ' + (e.code || e.message), 'ko'));
     $('aDate').value = ''; $('aQte').value = '';
     toast('Date ajoutée : ' + fmtQte(q) + ' u. au ' + dateLot(d));
@@ -1724,6 +1750,376 @@ function actionLot(id, action) {
     : { quantite: 0, statut: 'jete', closPar: utilisateur, closLe: FV.serverTimestamp() });
   lot.commit().catch(e => toast('Retrait refusé : ' + (e.code || e.message), 'ko'));
   toast('Retiré : ' + fmtQte(q) + ' u., perte ' + euro(arrondi(q * pu, 2)) + ' HT' + (pu ? '' : ' (pas de prix d\'achat)'));
+}
+
+// ============================================================
+//  IMPORT DE FACTURES D'ACHAT ET DE VENTES DE SHIFT
+//  Fichiers préparés par Claude à partir des documents papier.
+//  Facture : type;fournisseur;numero;date;ref;plu;description;code_rapport;tva_pct;quantite;
+//            prix_unitaire_ht;montant_ht;peremption;precision;prix_vente_ttc;remarque
+//            (une ligne « achat » par article, une ligne « total » pour le contrôle)
+//  Ventes  : type;shift;date;plu;description;code_rapport;quantite;montant
+//            (une ligne « vente » par article, une ligne « controle » par code rapport)
+// ============================================================
+let mvEnAttente = null;
+let reglagesVentes = { codesIgnores: ['1519', '1619', '9500', '7100'], pluIgnores: ['75369'] };
+let desabonnerVentesParam = null, desabonnerFactures = null, desabonnerShifts = null;
+let facturesRecentes = [], shiftsRecents = [];
+
+const cleDoc = s => normaliserTexte(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'x';
+
+function ecouterImports() {
+  if (desabonnerVentesParam) desabonnerVentesParam();
+  desabonnerVentesParam = db.collection('parametres').doc('ventes').onSnapshot(s => {
+    const d = (s.exists && s.data()) || {};
+    if (Array.isArray(d.codesIgnores)) reglagesVentes.codesIgnores = d.codesIgnores;
+    if (Array.isArray(d.pluIgnores)) reglagesVentes.pluIgnores = d.pluIgnores;
+    $('vIgnCodes').value = reglagesVentes.codesIgnores.join(', ');
+    $('vIgnPlu').value = reglagesVentes.pluIgnores.join(', ');
+  }, err => console.warn('Réglages ventes', err.code));
+  if (desabonnerFactures) desabonnerFactures();
+  desabonnerFactures = db.collection('factures').orderBy('le', 'desc').limit(10).onSnapshot(snap => {
+    facturesRecentes = [];
+    snap.forEach(d => facturesRecentes.push(Object.assign({ id: d.id, genre: 'facture' }, d.data({ serverTimestamps: 'estimate' }))));
+    renderImportsRecents();
+  }, err => console.warn('Factures', err.code));
+  if (desabonnerShifts) desabonnerShifts();
+  desabonnerShifts = db.collection('shifts').orderBy('le', 'desc').limit(10).onSnapshot(snap => {
+    shiftsRecents = [];
+    snap.forEach(d => shiftsRecents.push(Object.assign({ id: d.id, genre: 'shift' }, d.data({ serverTimestamps: 'estimate' }))));
+    renderImportsRecents();
+  }, err => console.warn('Shifts', err.code));
+}
+function arreterImports() {
+  [desabonnerVentesParam, desabonnerFactures, desabonnerShifts].forEach(f => f && f());
+  desabonnerVentesParam = desabonnerFactures = desabonnerShifts = null;
+}
+
+$('vIgnOk').addEventListener('click', () => {
+  const liste = v => v.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+  db.collection('parametres').doc('ventes').set({
+    codesIgnores: liste($('vIgnCodes').value), pluIgnores: liste($('vIgnPlu').value), modifiePar: utilisateur
+  }).catch(e => toast('Enregistrement refusé : ' + e.code, 'ko'));
+  toast('Réglages des ventes enregistrés');
+});
+
+// ---------- Lecture du fichier en objets { colonne: valeur } ----------
+function lignesObjets(tableau) {
+  const entete = tableau[0].map(c => cleEntete(c));
+  return tableau.slice(1).map((l, i) => {
+    const o = { _ligne: i + 2 };
+    entete.forEach((k, j) => { o[k] = String(l[j] == null ? '' : l[j]).trim(); });
+    return o;
+  }).filter(o => o.type);
+}
+
+$('mvFichier').addEventListener('change', () => annulerMv());
+$('mvAnalyser').addEventListener('click', async () => {
+  const f = $('mvFichier').files[0];
+  if (!f) { toast('Choisissez d\'abord le fichier.', 'warn'); return; }
+  if (!navigator.onLine) { toast('L\'import demande une connexion.', 'warn'); return; }
+  const btn = $('mvAnalyser');
+  btn.disabled = true; btn.textContent = 'Analyse…';
+  annulerMv();
+  try {
+    const lignes = lignesObjets(await lireFichierTableau(f));
+    if (!lignes.length) throw new Error('fichier vide ou colonne « type » absente.');
+    const types = new Set(lignes.map(l => l.type.toLowerCase()));
+    if (types.has('achat')) mvEnAttente = await analyserFacture(lignes);
+    else if (types.has('vente')) mvEnAttente = await analyserVentes(lignes);
+    else throw new Error('ce fichier ne contient ni lignes « achat » (facture) ni lignes « vente » (shift).');
+    mvEnAttente.fichier = f.name;
+    afficherApercuMv();
+  } catch (e) {
+    console.error(e);
+    $('mvApercu').innerHTML = '<div class="alerte">Analyse impossible : ' + esc(e.message || e.code) + '</div>';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Analyser le fichier';
+  }
+});
+$('mvAnnuler').addEventListener('click', () => { annulerMv(); toast('Import annulé : rien n\'a été modifié.'); });
+$('mvConfirmer').addEventListener('click', async () => {
+  if (!mvEnAttente) return;
+  if (!mvEnAttente.controleOk && !confirm('Les totaux ne correspondent pas au document. Importer quand même ?')) return;
+  const btn = $('mvConfirmer');
+  btn.disabled = true; btn.textContent = 'Import en cours…';
+  try {
+    const r = mvEnAttente.genre === 'facture' ? await executerFacture(mvEnAttente) : await executerVentes(mvEnAttente);
+    annulerMv();
+    $('mvApercu').innerHTML = '<div class="resultat ok">' + r + '</div>';
+    $('mvFichier').value = '';
+    toast('Import terminé');
+  } catch (e) {
+    console.error(e);
+    toast('Import impossible : ' + (e.code || e.message), 'ko');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Confirmer l\'import';
+  }
+});
+function annulerMv() {
+  mvEnAttente = null;
+  $('mvApercu').innerHTML = '';
+  $('mvValidation').classList.add('cache');
+}
+
+function ligneControle(libelle, attendu, calcule) {
+  const ok = Math.abs(attendu - calcule) < 0.015;
+  return { ok, html: '<tr><td>' + esc(libelle) + '</td><td class="n">' + euro(attendu) + '</td><td class="n">' + euro(calcule) + '</td><td>' + (ok ? '✅' : '⚠️ ' + euro(arrondi(calcule - attendu, 2))) + '</td></tr>' };
+}
+
+// ---------- FACTURE ----------
+async function analyserFacture(lignes) {
+  const achats = lignes.filter(l => l.type.toLowerCase() === 'achat');
+  const total = lignes.find(l => l.type.toLowerCase() === 'total');
+  const fournisseur = achats[0].fournisseur || '';
+  const numero = achats[0].numero || '';
+  if (!fournisseur || !numero) throw new Error('fournisseur ou numéro de facture manquant.');
+  const id = cleDoc(fournisseur) + '__' + cleDoc(numero);
+  const deja = await db.collection('factures').doc(id).get();
+  if (deja.exists && !deja.data().annulee) throw new Error('la facture ' + numero + ' de ' + fournisseur + ' a déjà été importée le ' + dateTexte(deja.data().le) + ' par ' + deja.data().par + '.');
+
+  // Correspondances déjà apprises pour ce fournisseur (référence fournisseur → produit)
+  const corr = new Map();
+  (await db.collection('correspondances').where('fournisseur', '==', cleDoc(fournisseur)).get()).forEach(d => corr.set(d.data().ref, d.data().code));
+
+  const plan = { genre: 'facture', id, fournisseur, numero, date: achats[0].date || '', lignes: [], controles: [] };
+  achats.forEach(l => {
+    const q = lireNombreImport(l.quantite), pu = lireNombreImport(l.prixunitaireht);
+    let montant = lireNombreImport(l.montantht);
+    if (montant == null && q != null && pu != null) montant = arrondi(q * pu, 2);
+    let code = null, nouveau = false, raison = '';
+    const n = l.plu ? lireCodeImport(l.plu) : null;
+    if (n && n.ok) {
+      code = cleExistante(n.code, catalogue) || n.code;
+      nouveau = !catalogue.has(code);
+    } else if (l.ref && corr.has(l.ref) && catalogue.has(corr.get(l.ref))) {
+      code = corr.get(l.ref);
+    } else {
+      nouveau = true;
+      if (n && !n.ok) raison = 'code ' + l.plu + ' invalide';
+    }
+    const per = l.peremption ? { peremption: l.peremption, precision: l.precision === 'mois' ? 'mois' : 'jour' } : null;
+    plan.lignes.push({
+      ligne: l._ligne, ref: l.ref || '', code, nouveau, raison,
+      description: (code && catalogue.get(code) ? catalogue.get(code).description : l.description).slice(0, 40),
+      descriptionFacture: l.description, codeRapport: (code && catalogue.get(code) ? catalogue.get(code).codeRapport : l.coderapport) || '0000',
+      tvaPct: lireNombreImport(l.tvapct), quantite: q, pu, montant, per,
+      prixVente: lireNombreImport(l.prixventettc), remarque: l.remarque || '',
+      erreur: !q || q <= 0 ? 'quantité manquante' : (pu == null ? 'prix manquant' : '')
+    });
+  });
+  const somme = arrondi(plan.lignes.reduce((s, x) => s + (x.montant || 0), 0), 2);
+  if (total) {
+    const c = ligneControle('Total HT de la facture' + (total.remarque ? ' (' + total.remarque + ')' : ''), lireNombreImport(total.montantht), somme);
+    plan.controles.push(c);
+  }
+  plan.lignes.forEach(x => {
+    if (x.quantite && x.pu != null && Math.abs(x.quantite * x.pu - x.montant) > 0.05) plan.controles.push(ligneControle('Ligne ' + x.ligne + ' ' + x.description + ' (quantité × prix)', x.montant, arrondi(x.quantite * x.pu, 2)));
+  });
+  plan.controleOk = plan.controles.every(c => c.ok) && plan.lignes.every(x => !x.erreur);
+  plan.total = somme;
+  return plan;
+}
+
+function afficherApercuMv() {
+  const p = mvEnAttente;
+  let h = '';
+  if (p.genre === 'facture') {
+    const nb = p.lignes.length, nouveaux = p.lignes.filter(x => x.nouveau).length;
+    h += '<div class="apercu"><b>Facture ' + esc(p.numero) + '</b> · ' + esc(p.fournisseur) + (p.date ? ' · ' + esc(p.date) : '') +
+      '<br>' + nb + ' ligne(s) · ' + (nb - nouveaux) + ' produit(s) reconnu(s) · ' + nouveaux + ' à créer · total ' + euro(p.total) + ' HT</div>';
+    h += '<div class="defile"><table class="inv"><thead><tr><th>Produit</th><th class="n">Qté</th><th class="n">PU HT</th><th>Péremption</th></tr></thead><tbody>' +
+      p.lignes.map((x, i) => '<tr><td>' + (x.nouveau
+          ? '<span class="badge orange">nouveau</span> ' + esc(x.description) +
+            '<br><input type="text" class="cbNouveau" data-i="' + i + '" inputmode="numeric" placeholder="Code-barres (facultatif)" value="' + esc(x.code || '') + '" style="margin-top:4px;padding:6px 8px">' +
+            (x.raison ? '<br><span class="aide">' + esc(x.raison) + '</span>' : '')
+          : esc(x.description) + '<br><span class="aide">' + esc(x.code) + (x.ref ? ' · réf. ' + esc(x.ref) : '') + '</span>') +
+        (x.prixVente != null ? '<br><span class="aide">prix de vente → ' + euro(x.prixVente) + '</span>' : '') +
+        (x.remarque ? '<br><span class="aide">⚠️ ' + esc(x.remarque) + '</span>' : '') +
+        (x.erreur ? '<br><span class="sansprix">' + esc(x.erreur) + '</span>' : '') + '</td>' +
+        '<td class="n">' + fmtQte(x.quantite) + '</td><td class="n">' + fmtPU(x.pu) + '</td><td>' + (x.per ? dateLot(x.per) : '—') + '</td></tr>').join('') +
+      '</tbody></table></div>';
+    h += '<p class="aide">Pour un produit nouveau, scannez ou tapez son code-barres s\'il en a un : sinon un numéro interne lui est attribué.</p>';
+  } else {
+    h += '<div class="apercu"><b>' + p.shifts.length + ' shift(s)</b> · ' + p.ventes.length + ' vente(s) déduite(s) du stock · ' +
+      p.ignorees + ' ligne(s) ignorée(s) (codes non suivis) · ' + p.inconnues.length + ' PLU inconnu(s)</div>';
+    p.shifts.forEach(s => {
+      h += '<h3 style="font-size:15px;margin:12px 0 4px">Shift ' + esc(s.numero) + (s.date ? ' · ' + esc(s.date) : '') + ' — ' + s.nb + ' article(s), ' + fmtQte(s.unites) + ' unité(s)</h3>';
+    });
+    if (p.inconnues.length) h += '<div class="alerte">PLU inconnus (ignorés) :<ul>' + p.inconnues.map(x => '<li>' + esc(x.plu) + ' ' + esc(x.description) + ' (' + esc(x.coderapport) + ') × ' + esc(x.quantite) + '</li>').join('') + '</ul>Créez ces produits dans le catalogue s\'ils doivent être suivis, puis réimportez.</div>';
+  }
+  if (p.controles.length) {
+    h += '<table class="inv"><thead><tr><th>Contrôle</th><th class="n">Document</th><th class="n">Calculé</th><th></th></tr></thead><tbody>' + p.controles.map(c => c.html).join('') + '</tbody></table>';
+  }
+  h += '<div class="' + (p.controleOk ? 'resultat ok' : 'alerte') + '">' + (p.controleOk ? '✅ Tout concorde : vous pouvez confirmer.' : '⚠️ Vérifiez les écarts ci-dessus avant de confirmer.') + ' Rien n\'est encore enregistré.</div>';
+  $('mvApercu').innerHTML = h;
+  $('mvValidation').classList.remove('cache');
+}
+
+async function executerFacture(p) {
+  const FV = firebase.firestore.FieldValue;
+  const maintenant = FV.serverTimestamp();
+  // Codes-barres saisis pour les nouveaux produits
+  document.querySelectorAll('.cbNouveau').forEach(inp => {
+    const x = p.lignes[Number(inp.dataset.i)];
+    const v = inp.value.trim();
+    if (!v) { x.code = null; return; }
+    const n = normaliserCode(v);
+    if (!n.ok) throw new Error('code-barres invalide pour ' + x.description + ' : ' + n.raison);
+    const ex = cleExistante(n.code, catalogue);
+    x.code = ex || n.code;
+    x.nouveau = !ex;
+    if (ex) x.description = catalogue.get(ex).description;
+  });
+  // Création des produits manquants (numéro interne si pas de code-barres)
+  let crees = 0;
+  for (const x of p.lignes.filter(l => l.nouveau && !l.erreur)) {
+    const donnees = {
+      description: x.description, codeRapport: x.codeRapport,
+      tvaPct: x.tvaPct != null ? x.tvaPct : (CATEGORIES[x.codeRapport] ? CATEGORIES[x.codeRapport].tva : 6),
+      prixVenteTTC: x.prixVente != null ? x.prixVente : null, consigne: null
+    };
+    const r = x.code ? await creerProduit(x.code, donnees) : await creerProduitInterne(donnees);
+    x.code = r.code;
+    if (!r.existe) crees++;
+  }
+  const refFacture = db.collection('factures').doc(p.id);
+  let lot = db.batch(), ops = 0;
+  const vider = async () => { if (ops) { await lot.commit(); lot = db.batch(); ops = 0; } };
+  for (const x of p.lignes.filter(l => !l.erreur)) {
+    const prod = catalogue.get(x.code) || { description: x.description, codeRapport: x.codeRapport };
+    let refLot = null;
+    if (x.per) {
+      refLot = db.collection('lots').doc();
+      lot.set(refLot, nouveauLot(x.code, prod, x.per, x.quantite, 'facture'));
+      ops++;
+    }
+    lot.set(db.collection('mouvements').doc(), {
+      type: 'entree', code: x.code, description: prod.description || x.description,
+      quantite: x.quantite, prixUnitaireHT: x.pu, totalHT: x.montant, modeSaisie: 'facture',
+      fournisseur: p.fournisseur, facture: p.numero, refFournisseur: x.ref || null,
+      importFacture: p.id, lotPeremption: refLot ? refLot.id : null,
+      par: utilisateur, le: maintenant, jour: jourLocal(), annulee: false
+    });
+    const maj = { stock: FV.increment(x.quantite), dernierPrixHT: x.pu, dernierAchatLe: maintenant, dernierFournisseur: p.fournisseur };
+    if (x.prixVente != null) { maj.prixVenteTTC = x.prixVente; maj.modifiePar = utilisateur; maj.modifieLe = maintenant; }
+    lot.update(db.collection('produits').doc(x.code), maj);
+    if (x.ref) lot.set(db.collection('correspondances').doc(cleDoc(p.fournisseur) + '__' + cleDoc(x.ref)),
+      { fournisseur: cleDoc(p.fournisseur), ref: x.ref, code: x.code, description: x.descriptionFacture, majPar: utilisateur });
+    ops += 3;
+    if (ops > 400) await vider();
+  }
+  lot.set(refFacture, {
+    fournisseur: p.fournisseur, numero: p.numero, date: p.date, lignes: p.lignes.length, totalHT: p.total,
+    par: utilisateur, le: maintenant, annulee: false
+  });
+  ops++;
+  await vider();
+  memoriserSaisie(p.fournisseur, '');
+  return '✅ Facture ' + esc(p.numero) + ' importée : ' + p.lignes.filter(l => !l.erreur).length + ' ligne(s), ' + crees + ' produit(s) créé(s), ' +
+    p.lignes.filter(l => l.per).length + ' date(s) de péremption, total ' + euro(p.total) + ' HT.';
+}
+
+// ---------- VENTES DE SHIFT ----------
+async function analyserVentes(lignes) {
+  const ventes = lignes.filter(l => l.type.toLowerCase() === 'vente');
+  const controles = lignes.filter(l => l.type.toLowerCase() === 'controle');
+  const codesIgn = new Set(reglagesVentes.codesIgnores), pluIgn = new Set(reglagesVentes.pluIgnores);
+  const plan = { genre: 'ventes', shifts: [], ventes: [], inconnues: [], ignorees: 0, controles: [] };
+  const parShift = new Map();
+  ventes.forEach(l => {
+    if (!l.shift) throw new Error('numéro de shift manquant (ligne ' + l._ligne + ').');
+    if (!parShift.has(l.shift)) parShift.set(l.shift, { numero: l.shift, date: l.date || '', nb: 0, unites: 0, montant: 0, montantParCode: {} });
+    const s = parShift.get(l.shift);
+    const montant = lireNombreImport(l.montant) || 0;
+    const cr = (l.coderapport || '').replace(/[.,]0+$/, '');
+    s.montantParCode[cr] = (s.montantParCode[cr] || 0) + montant;
+    const q = lireNombreImport(l.quantite) || 0;
+    const n = lireCodeImport(l.plu);
+    if (codesIgn.has(cr) || pluIgn.has(String(l.plu).replace(/^0+/, '')) || pluIgn.has(l.plu)) { plan.ignorees++; return; }
+    const code = n.ok ? cleExistante(n.code, catalogue) : null;
+    if (!code) { plan.inconnues.push(l); return; }
+    plan.ventes.push({ shift: l.shift, code, quantite: q, montant });
+    s.nb++; s.unites += q; s.montant += montant;
+  });
+  for (const s of parShift.values()) {
+    const d = await db.collection('shifts').doc(cleDoc(s.numero)).get();
+    if (d.exists && !d.data().annulee) throw new Error('le shift ' + s.numero + ' a déjà été importé le ' + dateTexte(d.data().le) + ' par ' + d.data().par + '.');
+    plan.shifts.push(s);
+  }
+  controles.forEach(c => {
+    const s = parShift.get(c.shift) || [...parShift.values()][0];
+    if (!s) return;
+    const cr = (c.coderapport || '').replace(/[.,]0+$/, '');
+    plan.controles.push(ligneControle('Shift ' + s.numero + ' · ' + libCategorie(cr), lireNombreImport(c.montant) || 0, arrondi(s.montantParCode[cr] || 0, 2)));
+  });
+  plan.controleOk = plan.controles.every(c => c.ok);
+  return plan;
+}
+
+async function executerVentes(p) {
+  const FV = firebase.firestore.FieldValue;
+  const maintenant = FV.serverTimestamp();
+  let lot = db.batch(), ops = 0;
+  for (const v of p.ventes) {
+    const prod = catalogue.get(v.code) || {};
+    lot.set(db.collection('mouvements').doc(), {
+      type: 'vente', code: v.code, description: prod.description || '', quantite: -v.quantite, montantTTC: v.montant,
+      shift: v.shift, importShift: cleDoc(v.shift), par: utilisateur, le: maintenant, jour: jourLocal(), annulee: false
+    });
+    lot.update(db.collection('produits').doc(v.code), { stock: FV.increment(-v.quantite) });
+    ops += 2;
+    if (ops > 400) { await lot.commit(); lot = db.batch(); ops = 0; }
+  }
+  p.shifts.forEach(s => lot.set(db.collection('shifts').doc(cleDoc(s.numero)), {
+    numero: s.numero, date: s.date, articles: s.nb, unites: arrondi(s.unites, 3), montantTTC: arrondi(s.montant, 2),
+    par: utilisateur, le: maintenant, annulee: false
+  }));
+  await lot.commit();
+  return '✅ ' + p.shifts.length + ' shift(s) importé(s) : ' + p.ventes.length + ' vente(s) déduite(s) du stock.';
+}
+
+// ---------- Liste des imports et annulation ----------
+function renderImportsRecents() {
+  const ul = $('mvHistorique');
+  if (!ul) return;
+  const l = facturesRecentes.concat(shiftsRecents).sort((a, b) => ms(b.le) - ms(a.le)).slice(0, 12);
+  if (!l.length) { ul.innerHTML = '<li class="aide">Aucun import pour l\'instant.</li>'; return; }
+  ul.innerHTML = l.map(x => '<li><div class="desc"><b>' + (x.genre === 'facture' ? 'Facture ' + esc(x.numero) + ' · ' + esc(x.fournisseur) : 'Shift ' + esc(x.numero)) + '</b><br>' +
+    '<span class="aide">' + (x.date ? esc(x.date) + ' · ' : '') + (x.genre === 'facture' ? x.lignes + ' ligne(s), ' + euro(x.totalHT) + ' HT' : x.articles + ' article(s), ' + euro(x.montantTTC) + ' TTC') +
+    ' · ' + dateTexte(x.le) + ' · ' + esc(x.par) + (x.annulee ? ' · annulé par ' + esc(x.annuleePar) : '') + '</span></div>' +
+    (x.annulee ? '' : '<button class="btn second petit" data-imp="' + esc(x.genre) + ':' + esc(x.id) + '">Annuler</button>') + '</li>').join('');
+}
+$('mvHistorique').addEventListener('click', e => {
+  const b = e.target.closest('[data-imp]');
+  if (b) { const [genre, id] = b.dataset.imp.split(':'); annulerImport2(genre, id); }
+});
+async function annulerImport2(genre, id) {
+  const x = (genre === 'facture' ? facturesRecentes : shiftsRecents).find(y => y.id === id);
+  if (!x || x.annulee) return;
+  if (!navigator.onLine) { toast('L\'annulation demande une connexion.', 'warn'); return; }
+  const nom = genre === 'facture' ? 'la facture ' + x.numero + ' (' + x.fournisseur + ')' : 'le shift ' + x.numero;
+  if (!confirm('Annuler ' + nom + ' ?\n\nToutes ses lignes seront annulées et le stock corrigé. Les produits créés restent dans le catalogue.')) return;
+  try {
+    const FV = firebase.firestore.FieldValue;
+    const snap = await db.collection('mouvements').where(genre === 'facture' ? 'importFacture' : 'importShift', '==', id).get({ source: 'server' });
+    const mv = [];
+    snap.forEach(d => { const m = d.data(); if (!m.annulee) mv.push(Object.assign({ id: d.id }, m)); });
+    for (let i = 0; i < mv.length; i += 150) {
+      const lot = db.batch();
+      mv.slice(i, i + 150).forEach(m => {
+        lot.update(db.collection('mouvements').doc(m.id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
+        lot.update(db.collection('produits').doc(m.code), { stock: FV.increment(-m.quantite) });
+        if (m.lotPeremption) lot.update(db.collection('lots').doc(m.lotPeremption), { statut: 'annule', closPar: utilisateur, closLe: FV.serverTimestamp() });
+      });
+      await lot.commit();
+    }
+    await db.collection(genre === 'facture' ? 'factures' : 'shifts').doc(id).update({ annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
+    toast((genre === 'facture' ? 'Facture' : 'Shift') + ' annulé(e) : ' + mv.length + ' ligne(s)');
+  } catch (e) {
+    console.error(e);
+    toast('Annulation impossible : ' + (e.code || e.message), 'ko');
+  }
 }
 
 // ============================================================
@@ -2351,10 +2747,13 @@ async function sauvegarder(motif) {
   const mouvements = await lire('mouvements');
   const remises = await lire('remisesZero');
   const lots = await lire('lots');
+  const factures = await lire('factures');
+  const shifts = await lire('shifts');
+  const correspondances = await lire('correspondances');
   const produits = [...catalogue.entries()].map(([id, p]) => Object.assign({ id }, versJSON(p)));
   const contenu = JSON.stringify({
     application: 'Stock Shop Paliseul', version: VERSION, date: new Date().toISOString(), par: utilisateur,
-    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises, lots
+    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises, lots, factures, shifts, correspondances
   }, null, 1);
   const heure = new Date().toTimeString().slice(0, 5).replace(':', 'h');
   telecharger('sauvegarde_stock_shop_' + jourLocal() + '_' + heure + '.json', contenu, 'application/json');
@@ -2603,8 +3002,8 @@ function guideHTML() {
 
   '<details><summary>6. Dates de péremption</summary>' +
   '<p>Le suivi est actif pour l\'alimentation, les glaces, les boissons et les bières. Il se règle par catégorie (Outils → Catégories) ou par produit (fiche → Infos produit).</p>' +
-  '<ol><li><b>À la livraison</b> : dans « Encoder une entrée », remplissez la <b>date de péremption</b> lue sur l\'emballage et, si vous voulez, l\'<b>emplacement</b> (rayon, frigo, réserve…). Cochez « Mois et année seulement » pour une date du type « à consommer de préférence avant fin 11/2026 ».</li>' +
-  '<li><b>Pour le stock déjà en rayon</b> : fiche du produit → Dates de péremption → « + Ajouter une date » (date, quantité, emplacement).</li></ol>' +
+  '<ol><li><b>À la livraison</b> : dans « Encoder une entrée », remplissez la <b>date de péremption</b> lue sur l\'emballage. Cochez « Mois et année seulement » pour une date du type « à consommer de préférence avant fin 11/2026 ».</li>' +
+  '<li><b>Pour le stock déjà en rayon</b> : fiche du produit → Dates de péremption → « + Ajouter une date » (date et quantité).</li></ol>' +
   '<p><b>Alertes</b> : <span class="echeance rouge">rouge</span> si c\'est périmé ou à 7 jours ou moins, <span class="echeance orange">orange</span> jusqu\'à 30 jours. Les seuils se règlent dans Outils. Un bandeau s\'affiche à l\'ouverture (✕ pour le masquer jusqu\'au lendemain), l\'onglet Péremption affiche le nombre de lots urgents, et le Catalogue montre un badge ⏰.</p>' +
   '<p>Pour chaque lot :</p><ul>' +
   '<li><b>Épuisé</b> : tout a été vendu, le lot n\'est plus signalé.</li>' +
@@ -2642,17 +3041,28 @@ function guideHTML() {
   '<p>Le stock et les prix d\'achat ne sont <b>jamais</b> modifiés par un import. Un code rapport inconnu crée sa catégorie (« Code 5019 ») : donnez-lui un nom dans Catégories.</p>' +
   '<div class="astuce"><b>Attention avec Excel</b> : si on ouvre un CSV dans Excel puis qu\'on l\'enregistre, Excel peut écrire les codes-barres en « 5,41E+12 » (les chiffres sont perdus). L\'appli refuse ces lignes. Solutions : importer le fichier d\'origine sans l\'ouvrir, ou, dans Excel, mettre la colonne des codes au format <b>Texte</b> avant de saisir, et enregistrer en <b>.xlsx</b>.</div></details>' +
 
-  '<details><summary>12. Remise à zéro du stock</summary>' +
+  '<details><summary>12. Importer une facture ou des ventes de shift</summary>' +
+  '<p>Le principe : Patrick envoie à Claude la photo ou le scan du document, Claude renvoie un fichier, que l\'on importe ici.</p>' +
+  '<p><b>Facture d\'achat</b> : écrivez les dates de péremption à côté des articles (« 24/2 », ou « 9/27 » pour fin septembre 2027) et, si besoin, le nouveau prix de vente (« 3,45 »).</p>' +
+  '<ol><li>Outils → <b>Importer une facture ou des ventes</b> : choisissez le fichier, puis <b>Analyser le fichier</b>.</li>' +
+  '<li>L\'aperçu montre chaque ligne (produit, quantité, prix d\'achat, date) et les remarques ⚠️ sur ce qui était difficile à lire. Il indique aussi le <b>contrôle du total</b> : ✅ si la somme des lignes est égale au total du document.</li>' +
+  '<li>Pour un produit <span class="badge orange">nouveau</span>, scannez ou tapez son code-barres dans la case. Sinon, un numéro interne lui est attribué.</li>' +
+  '<li><b>Confirmer l\'import</b> : le stock, le prix d\'achat, le fournisseur, les dates de péremption et les prix de vente sont mis à jour.</li></ol>' +
+  '<p>L\'appli retient la correspondance « référence du fournisseur → produit » pour les factures suivantes.</p>' +
+  '<p><b>Ventes de shift</b> : même principe, chaque vente diminue le stock. Les lignes de carburant, de loterie, de cautions et le café sont ignorées ; la liste se règle dans Outils → « Ventes de shift : lignes ignorées ». Les totaux par code rapport sont contrôlés.</p>' +
+  '<div class="astuce">Une même facture (fournisseur + n°) ou un même shift ne peut être importé qu\'une fois. En cas d\'erreur, <b>Annuler</b> dans « Derniers imports » annule toutes ses lignes et corrige le stock. Il faut avoir fait le <b>comptage de départ</b> avant d\'importer des ventes, sinon les stocks deviennent négatifs.</div></details>' +
+
+  '<details><summary>13. Remise à zéro du stock</summary>' +
   '<ol><li>Outils → <b>Remise à zéro</b> : choisissez un code rapport (ou tous).</li>' +
   '<li>L\'aperçu montre le nombre de produits, d\'unités et la valeur concernés.</li>' +
   '<li>Tapez <b>ZERO</b> puis <b>Remettre à zéro</b>. Une sauvegarde complète est d\'abord téléchargée.</li></ol>' +
   '<p>Les prix d\'achat sont conservés. En cas d\'erreur, <b>Annuler</b> dans « Dernières remises à zéro » rétablit tous les stocks d\'un coup.</p>' +
   '<div class="astuce">Usage typique : remettre une catégorie à zéro, puis la compter produit par produit (Comptage).</div></details>' +
 
-  '<details><summary>13. Sauvegarde</summary>' +
+  '<details><summary>14. Sauvegarde</summary>' +
   '<p>Outils → <b>Sauvegarde complète</b> télécharge toutes les données dans un fichier. Faites-en une par mois et gardez-la sur le PC.</p></details>' +
 
-  '<details><summary>14. Questions fréquentes</summary>' +
+  '<details><summary>15. Questions fréquentes</summary>' +
   '<p><b>La caméra ne s\'ouvre pas ?</b> Autorisez la caméra pour le site dans Chrome (cadenas à gauche de l\'adresse).</p>' +
   '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres. Créez la nouvelle fiche ; l\'ancienne restera à stock 0.</p>' +
   '<p><b>L\'appli ne montre pas la dernière version ?</b> Fermez-la complètement et rouvrez-la. Le numéro de version est en haut à côté du titre.</p>' +

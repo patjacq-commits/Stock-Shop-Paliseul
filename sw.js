@@ -1,7 +1,7 @@
 // Service Worker — Stock Shop Paliseul
 // Stratégie Network First : on prend toujours la dernière version en ligne,
 // le cache ne sert que hors connexion. Incrémenter VERSION à chaque livraison.
-const VERSION = 'v0.4.0';
+const VERSION = 'v0.5.0';
 const CACHE = 'stock-shop-' + VERSION;
 const FICHIERS = ['./', './index.html', './manifest.json', './icon-192.png'];
 
