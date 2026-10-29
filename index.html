@@ -305,6 +305,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
     <!-- Onglet Inventaire -->
     <section id="ongletInventaire" class="cache">
       <div class="carte no-print" id="icCarte"></div>
+      <div class="carte no-print" id="iaCarte"></div>
       <div class="carte no-print">
         <label class="coche"><input type="checkbox" id="iZero"> Inclure les produits à stock zéro</label>
         <div class="deux">
@@ -400,6 +401,20 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
         <p class="aide">À faire régulièrement, par exemple une fois par mois, et à garder sur le PC.</p>
       </div>
       <div class="carte">
+        <h2>Restaurer une sauvegarde</h2>
+        <p class="aide" style="margin-top:0">Remet les stocks, prix d'achat, fiches produits, catégories et codes-barres secondaires comme dans une sauvegarde (fichier .json). Un aperçu s'affiche avant toute modification.</p>
+        <input type="file" id="rsFichier" accept=".json,application/json" style="margin-top:6px">
+        <div id="rsApercu" style="margin-top:10px"></div>
+        <div class="cache" id="rsValidation">
+          <label for="rsMot">Pour confirmer, tapez RESTAURER</label>
+          <input type="text" id="rsMot" autocomplete="off" autocapitalize="characters">
+          <div class="deux" style="margin-top:10px">
+            <button class="btn second" id="rsAnnuler">Annuler</button>
+            <button class="btn danger" id="rsOk">Restaurer</button>
+          </div>
+        </div>
+      </div>
+      <div class="carte">
         <h2>Compte</h2>
         <p style="margin:0">Connectée : <b id="oUtilisateur"></b></p>
         <p class="aide" id="oInfo"></p>
@@ -422,11 +437,18 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.5.2';
+const VERSION = 'v0.5.3';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.5.3', date: '29/10/2026', points: [
+    'Inventaire arrêté (onglet Inventaire) : stock et valeur calculés à une date passée (ex. 31/12), même plusieurs jours après, puis enregistrés et réimprimables les années suivantes.',
+    'Restaurer une sauvegarde (Outils) : stocks, prix d\'achat, fiches, catégories et codes secondaires remis comme dans le fichier, avec aperçu et confirmation.',
+    'Annuler ou supprimer une facture remet aussi le prix d\'achat et le fournisseur de l\'achat précédent.',
+    'Avertissement si on importe une facture ou un shift pendant un inventaire rapide en cours.',
+    'Correction : annuler un « Jeté » dont le lot a été supprimé ne provoque plus d\'erreur.'
+  ] },
   { v: 'v0.5.2', date: '29/10/2026', points: [
     'Après chaque import de facture ou de shift, l\'appli demande : « Conserver dans l\'historique » ou « Supprimer définitivement » (test ou erreur).',
     'Outils → « Imports à classer » : les imports pas encore décidés, avec Conserver et Supprimer.',
@@ -717,6 +739,7 @@ function demarrer() {
       arreterImports();
       arreterSortiesEtAlias();
       arreterComptages();
+      arreterInventaires();
       afficherConnexion('');
     }
   });
@@ -756,6 +779,7 @@ function afficherAppli() {
   ecouterImports();
   ecouterSortiesEtAlias();
   ecouterComptages();
+  ecouterInventaires();
   afficherNouveautesSiBesoin();
 }
 
@@ -1507,6 +1531,8 @@ function renderHistorique() {
       if (det) txt += '<br><span class="aide">' + esc(det) + '</span>';
     } else if (m.type === 'vente') {
       txt = 'Vente shift ' + esc(m.shift) + ' : <b>' + fmtQte(m.quantite) + '</b>' + (m.montantTTC != null ? ' · ' + euro(m.montantTTC) + ' TTC' : '');
+    } else if (m.type === 'restauration') {
+      txt = 'Restauration d\'une sauvegarde : ' + fmtQte(m.stockAvant) + ' → <b>' + fmtQte(m.stockCompte) + '</b> (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ')';
     } else if (m.type === 'sortie') {
       txt = 'Sortie (' + esc(MOTIFS_SORTIE[m.motif] || m.motif) + ') : <b>' + fmtQte(m.quantite) + '</b>' + (m.valeurHT ? ' · ' + euro(m.valeurHT) + ' HT' : '');
     } else if (m.type === 'perte') {
@@ -1523,7 +1549,7 @@ function renderHistorique() {
 }
 
 // Un mouvement annulé reste visible (barré) : on garde la trace de tout
-function annulerMouvement(id) {
+async function annulerMouvement(id) {
   const m = (historiqueCourant || []).find(x => x.id === id);
   if (!m || m.annulee) return;
   const pm = catalogue.get(m.code);
@@ -1531,6 +1557,11 @@ function annulerMouvement(id) {
   if (!confirm('Annuler ce mouvement (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ') ?\n\nIl restera visible, barré, et le stock sera corrigé.' +
     (apres < 0 ? '\n\n⚠️ Le stock passerait à ' + fmtQte(apres) + ' (négatif). A-t-il été recompté ou remis à zéro depuis ?' : ''))) return;
   const FV = firebase.firestore.FieldValue;
+  // Le lot de péremption lié peut avoir été effacé (suppression de la facture) : on ne le touche alors pas
+  let lotExiste = false;
+  if (m.lotPeremption) {
+    try { lotExiste = (await db.collection('lots').doc(m.lotPeremption).get()).exists; } catch (e) { lotExiste = false; }
+  }
   const lot = db.batch();
   lot.update(db.collection('mouvements').doc(id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
   const maj = { stock: FV.increment(-m.quantite) };
@@ -1542,8 +1573,8 @@ function annulerMouvement(id) {
   }
   lot.update(db.collection('produits').doc(m.code), maj);
   // Lot de péremption lié : annulé avec l'entrée, ou remis en place si on annule un retrait
-  if (m.lotPeremption && m.type === 'entree') lot.update(db.collection('lots').doc(m.lotPeremption), { statut: 'annule', closPar: utilisateur, closLe: FV.serverTimestamp() });
-  if (m.lotPeremption && m.type === 'perte') lot.update(db.collection('lots').doc(m.lotPeremption), { quantite: FV.increment(-m.quantite), statut: 'actif' });
+  if (lotExiste && m.type === 'entree') lot.update(db.collection('lots').doc(m.lotPeremption), { statut: 'annule', closPar: utilisateur, closLe: FV.serverTimestamp() });
+  if (lotExiste && m.type === 'perte') lot.update(db.collection('lots').doc(m.lotPeremption), { quantite: FV.increment(-m.quantite), statut: 'actif' });
   lot.commit().catch(e => toast('Annulation refusée : ' + (e.code || e.message), 'ko'));
   toast('Mouvement annulé');
 }
@@ -1901,6 +1932,7 @@ $('mvAnnuler').addEventListener('click', () => { annulerMv(); toast('Import annu
 $('mvConfirmer').addEventListener('click', async () => {
   if (!mvEnAttente) return;
   if (!mvEnAttente.controleOk && !confirm('Les totaux ne correspondent pas au document. Importer quand même ?')) return;
+  if (sessionComptage && !confirm('Un inventaire rapide est en cours (' + libelleSession(sessionComptage) + ').\n\nImporter maintenant peut fausser le comptage : les quantités déjà comptées ne tiennent pas compte de cet import. Il vaut mieux clôturer le comptage d\'abord.\n\nImporter quand même ?')) return;
   const btn = $('mvConfirmer');
   btn.disabled = true; btn.textContent = 'Import en cours…';
   try {
@@ -2015,6 +2047,7 @@ function afficherApercuMv() {
   if (p.controles.length) {
     h += '<table class="inv"><thead><tr><th>Contrôle</th><th class="n">Document</th><th class="n">Calculé</th><th></th></tr></thead><tbody>' + p.controles.map(c => c.html).join('') + '</tbody></table>';
   }
+  if (sessionComptage) h += '<div class="alerte">⚠️ Un inventaire rapide est en cours (' + esc(libelleSession(sessionComptage)) + ') : clôturez-le avant d\'importer.</div>';
   h += '<div class="' + (p.controleOk ? 'resultat ok' : 'alerte') + '">' + (p.controleOk ? '✅ Tout concorde : vous pouvez confirmer.' : '⚠️ Vérifiez les écarts ci-dessus avant de confirmer.') + ' Rien n\'est encore enregistré.</div>';
   $('mvApercu').innerHTML = h;
   $('mvValidation').classList.remove('cache');
@@ -2311,6 +2344,9 @@ async function executerSuppression(imports, mv, corriger) {
       });
       await lot.commit();
     }
+    // Prix d'achat et fournisseur : ceux de l'achat valide précédent
+    const achats = mv.filter(m => m.type === 'entree');
+    if (achats.length) await recalculerPrix(achats.map(m => m.code), mv.map(m => m.id));
     // 2. Lots de péremption liés : marqués annulés puis effacés
     const lots = [...new Set(mv.map(m => m.lotPeremption).filter(Boolean))];
     for (let i = 0; i < lots.length; i += 200) {
@@ -2455,6 +2491,8 @@ async function annulerImport2(genre, id) {
       await lot.commit();
     }
     await db.collection(genre === 'facture' ? 'factures' : 'shifts').doc(id).update({ annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
+    const achats = mv.filter(m => m.type === 'entree');
+    if (achats.length) await recalculerPrix(achats.map(m => m.code), mv.map(m => m.id));
     toast((genre === 'facture' ? 'Facture' : 'Shift') + ' annulé(e) : ' + mv.length + ' ligne(s)');
   } catch (e) {
     console.error(e);
@@ -2996,6 +3034,276 @@ async function executerCloture(lignes, aZero) {
 }
 
 // ============================================================
+//  PRIX D'ACHAT : recalcul après annulation ou suppression d'achats
+// ============================================================
+// Le dernier prix redevient celui de l'achat valide le plus récent (hors mouvements exclus)
+async function recalculerPrix(codes, exclus) {
+  const ex = new Set(exclus || []);
+  const lot = db.batch();
+  let n = 0;
+  for (const code of new Set(codes)) {
+    if (!catalogue.has(code)) continue;
+    const snap = await db.collection('mouvements').where('code', '==', code).get();
+    const achats = [];
+    snap.forEach(d => { const m = d.data(); if (m.type === 'entree' && !m.annulee && !ex.has(d.id)) achats.push(m); });
+    achats.sort((a, b) => ms(b.le) - ms(a.le));
+    const der = achats[0];
+    lot.update(db.collection('produits').doc(code), {
+      dernierPrixHT: der ? der.prixUnitaireHT : null,
+      dernierFournisseur: der ? (der.fournisseur || null) : null
+    });
+    n++;
+  }
+  if (n) await lot.commit();
+  return n;
+}
+
+// ============================================================
+//  RESTAURER UNE SAUVEGARDE
+//  Remet le catalogue (stocks, prix d'achat, infos), les catégories et les codes secondaires
+//  dans l'état de la sauvegarde. Chaque écart de stock est noté dans l'historique (annulable).
+// ============================================================
+let restauEnAttente = null;
+const CHAMPS_RESTAU = ['description', 'codeRapport', 'tvaPct', 'prixVenteTTC', 'consigne', 'dernierPrixHT', 'dernierFournisseur', 'suiviPeremption', 'uniteParCarton', 'archive'];
+
+$('rsFichier').addEventListener('change', async () => {
+  const f = $('rsFichier').files[0];
+  restauEnAttente = null;
+  $('rsValidation').classList.add('cache');
+  if (!f) { $('rsApercu').innerHTML = ''; return; }
+  try {
+    const s = JSON.parse(await f.text());
+    if (s.application !== 'Stock Shop Paliseul' || !Array.isArray(s.produits)) throw new Error('ce fichier n\'est pas une sauvegarde de Stock Shop.');
+    const aCreer = [], aModifier = [], apres = [];
+    const vus = new Set();
+    s.produits.forEach(b => {
+      const code = b.id || b.code;
+      if (!code || !b.description) return;
+      vus.add(code);
+      const a = catalogue.get(code);
+      if (!a) { aCreer.push(b); return; }
+      const champs = CHAMPS_RESTAU.filter(k => (b[k] == null ? null : b[k]) !== (a[k] == null ? null : a[k]));
+      const dStock = arrondi((b.stock || 0) - (a.stock || 0), 3);
+      if (champs.length || dStock) aModifier.push({ b, a, champs, dStock });
+    });
+    catalogue.forEach((p, code) => { if (!vus.has(code)) apres.push(p); });
+    restauEnAttente = { s, aCreer, aModifier, apres };
+    const dStocks = aModifier.filter(x => x.dStock);
+    $('rsApercu').innerHTML = '<div class="apercu"><b>Sauvegarde du ' + esc(new Date(s.date).toLocaleString('fr-BE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })) + '</b>' +
+      ' par ' + esc(s.par || '?') + ' (' + esc(s.motif || 'manuelle') + ', version ' + esc(s.version || '?') + ')<br>' +
+      s.produits.length + ' produit(s) dans la sauvegarde.</div>' +
+      '<ul style="font-size:14px;padding-left:18px">' +
+      '<li><b>' + dStocks.length + '</b> stock(s) remis comme dans la sauvegarde</li>' +
+      '<li><b>' + aModifier.filter(x => x.champs.length).length + '</b> fiche(s) dont les infos ou le prix d\'achat sont remis</li>' +
+      '<li><b>' + aCreer.length + '</b> produit(s) recréé(s) (absents aujourd\'hui)</li>' +
+      '<li><b>' + apres.length + '</b> produit(s) créé(s) après la sauvegarde : gardés tels quels</li></ul>' +
+      (dStocks.length ? '<div class="defile"><table class="inv"><thead><tr><th>Produit</th><th class="n">Actuel</th><th class="n">Sauvegarde</th></tr></thead><tbody>' +
+        dStocks.slice(0, 40).map(x => '<tr><td>' + esc(x.b.description) + '</td><td class="n">' + fmtQte(x.a.stock || 0) + '</td><td class="n">' + fmtQte(x.b.stock || 0) + '</td></tr>').join('') +
+        '</tbody></table></div>' + (dStocks.length > 40 ? '<p class="aide">… et ' + (dStocks.length - 40) + ' autre(s)</p>' : '') : '') +
+      '<p class="aide">Les factures, shifts, dates de péremption et l\'historique ne sont pas effacés : chaque écart de stock est ajouté à l\'historique du produit (« Restauration »), annulable. Une sauvegarde de l\'état actuel est téléchargée juste avant.</p>';
+    $('rsValidation').classList.remove('cache');
+  } catch (e) {
+    $('rsApercu').innerHTML = '<div class="alerte">Lecture impossible : ' + esc(e.message) + '</div>';
+  }
+});
+$('rsOk').addEventListener('click', async () => {
+  const r = restauEnAttente;
+  if (!r) return;
+  if ($('rsMot').value.trim().toUpperCase() !== 'RESTAURER') { toast('Tapez RESTAURER pour confirmer.', 'warn'); return; }
+  if (!navigator.onLine) { toast('La restauration demande une connexion.', 'warn'); return; }
+  const FV = firebase.firestore.FieldValue;
+  $('rsOk').disabled = true;
+  try {
+    await sauvegarder('avant restauration');
+    const ops = [];   // fonctions (lot) => nombre d'écritures
+    r.aCreer.forEach(b => ops.push(lot => {
+      const d = { code: b.id || b.code, stock: b.stock || 0, creePar: utilisateur, creeLe: FV.serverTimestamp(), source: 'restauration' };
+      CHAMPS_RESTAU.forEach(k => { if (b[k] != null) d[k] = b[k]; });
+      lot.set(db.collection('produits').doc(d.code), d);
+      if (d.stock) lot.set(db.collection('mouvements').doc(), mvRestau(d.code, b.description, d.stock, 0, FV));
+    }));
+    r.aModifier.forEach(x => ops.push(lot => {
+      const maj = {};
+      x.champs.forEach(k => { maj[k] = x.b[k] == null ? null : x.b[k]; });
+      if (x.dStock) {
+        maj.stock = FV.increment(x.dStock);
+        lot.set(db.collection('mouvements').doc(), mvRestau(x.a.code || x.b.id, x.b.description, x.dStock, x.a.stock || 0, FV));
+      }
+      lot.update(db.collection('produits').doc(x.a.code || x.b.id), maj);
+    }));
+    for (let i = 0; i < ops.length; i += 150) {
+      const lot = db.batch();
+      ops.slice(i, i + 150).forEach(f => f(lot));
+      await lot.commit();
+    }
+    // Catégories et codes secondaires de la sauvegarde
+    const lot = db.batch();
+    let nb = 0;
+    Object.entries(r.s.categories || {}).forEach(([c, v]) => {
+      if (v && v.nom && typeof v.tva === 'number') { lot.set(db.collection('categories').doc(c), { nom: v.nom, court: v.court || c, tva: v.tva, peremption: !!v.peremption }); nb++; }
+    });
+    (r.s.alias || []).forEach(a => { if (a.id && a.code && a.id !== a.code) { lot.set(db.collection('alias').doc(a.id), { code: a.code, description: a.description || '', creePar: a.creePar || utilisateur }); nb++; } });
+    if (nb) await lot.commit();
+    $('rsApercu').innerHTML = '<div class="resultat ok">✅ Restauration terminée : ' + r.aModifier.length + ' produit(s) remis, ' + r.aCreer.length + ' recréé(s).</div>';
+    $('rsValidation').classList.add('cache');
+    $('rsFichier').value = ''; $('rsMot').value = '';
+    restauEnAttente = null;
+    toast('Restauration terminée');
+  } catch (e) {
+    console.error(e);
+    toast('Restauration interrompue : ' + (e.code || e.message), 'ko');
+  } finally {
+    $('rsOk').disabled = false;
+  }
+});
+$('rsAnnuler').addEventListener('click', () => {
+  restauEnAttente = null; $('rsFichier').value = ''; $('rsMot').value = '';
+  $('rsApercu').innerHTML = ''; $('rsValidation').classList.add('cache');
+});
+function mvRestau(code, desc, delta, avant, FV) {
+  return { type: 'restauration', code, description: desc || '', quantite: delta, stockAvant: avant, stockCompte: arrondi(avant + delta, 3),
+    par: utilisateur, le: FV.serverTimestamp(), jour: jourLocal(), annulee: false };
+}
+
+// ============================================================
+//  INVENTAIRE ARRÊTÉ (clôture annuelle)
+//  Stock à une date = stock actuel − mouvements datés après cette date.
+//  Date d'un mouvement : date du document pour une facture ou un shift, sinon jour d'encodage.
+// ============================================================
+let inventaireArrete = null;     // inventaire enregistré affiché à la place du stock actuel
+let inventairesListe = [];
+let desabonnerInventaires = null;
+
+function ecouterInventaires() {
+  if (desabonnerInventaires) desabonnerInventaires();
+  desabonnerInventaires = db.collection('inventaires').onSnapshot(snap => {
+    inventairesListe = [];
+    snap.forEach(d => inventairesListe.push(Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' }))));
+    inventairesListe.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    renderCarteArrete();
+  }, err => console.warn('Inventaires', err.code));
+}
+function arreterInventaires() {
+  if (desabonnerInventaires) desabonnerInventaires();
+  desabonnerInventaires = null;
+  inventaireArrete = null;
+}
+// « 21/10/2026 » ou « 2026-10-21 » → « 2026-10-21 »
+function dateISO(s) {
+  const m = dateBelge(s).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return m ? m[3] + '-' + m[2] + '-' + m[1] : null;
+}
+function dateDefautArrete() {
+  const auj = new Date();
+  return auj.getMonth() === 0 ? (auj.getFullYear() - 1) + '-12-31' : jourLocal();
+}
+
+function renderCarteArrete() {
+  const c = $('iaCarte');
+  if (!c) return;
+  if (inventaireArrete) {
+    const pr = inventaireArrete.provisoire;
+    c.innerHTML = '<div class="resultat info">Vous regardez l\'<b>inventaire arrêté au ' + esc(dateBelge(inventaireArrete.date)) + '</b>' +
+      (pr ? ' : aperçu <b>non enregistré</b>.' : ' (enregistré par ' + esc(inventaireArrete.par) + ' le ' + dateTexte(inventaireArrete.le) + ').') + '</div>' +
+      (pr ? '<button class="btn plein" id="iaEnreg2" style="margin-top:8px">Enregistrer cet inventaire</button>' : '') +
+      '<button class="btn second plein" id="iaRetour" style="margin-top:8px">Revenir au stock actuel</button>';
+    if (pr) $('iaEnreg2').onclick = () => enregistrerArrete(inventaireArrete);
+    $('iaRetour').onclick = () => { inventaireArrete = null; renderCarteArrete(); renderInventaire(); };
+    return;
+  }
+  c.innerHTML = '<h2>Inventaire arrêté (clôture annuelle)</h2>' +
+    '<p class="aide" style="margin-top:0">Calcule le stock et sa valeur à une date passée (par exemple le 31/12), même si on le fait quelques jours plus tard, puis l\'enregistre pour toujours.</p>' +
+    '<div class="ligne"><input type="date" id="iaDate" value="' + dateDefautArrete() + '"><button class="btn" id="iaCalculer">Calculer</button></div>' +
+    '<div id="iaApercu"></div>' +
+    (inventairesListe.length ? '<h3 style="font-size:14px;margin:14px 0 4px">Inventaires enregistrés</h3><ul class="cat-liste">' +
+      inventairesListe.map(x => '<li><div class="desc"><b>Au ' + esc(dateBelge(x.date)) + '</b> · ' + euro(x.total) + ' HT<br><span class="aide">' + x.nbArticles + ' article(s) · enregistré le ' + dateTexte(x.le) + ' par ' + esc(x.par) + '</span></div>' +
+        '<button class="btn second petit" data-inv="' + esc(x.id) + '">Voir / imprimer</button></li>').join('') + '</ul>' : '');
+  $('iaCalculer').onclick = calculerArrete;
+  c.querySelectorAll('[data-inv]').forEach(b => b.onclick = () => {
+    inventaireArrete = inventairesListe.find(x => x.id === b.dataset.inv);
+    renderCarteArrete(); renderInventaire(); window.scrollTo(0, 0);
+  });
+}
+
+async function calculerArrete() {
+  const d = $('iaDate').value;
+  if (!d) { toast('Choisissez la date.', 'warn'); return; }
+  if (d > jourLocal()) { toast('La date ne peut pas être dans le futur.', 'warn'); return; }
+  if (!navigator.onLine) { toast('Le calcul demande une connexion.', 'warn'); return; }
+  $('iaApercu').innerHTML = '<p class="aide">Calcul…</p>';
+  try {
+    const dateDoc = new Map();   // import → date du document
+    facturesRecentes.forEach(f => dateDoc.set('f:' + f.id, dateISO(f.date)));
+    shiftsRecents.forEach(s => dateDoc.set('s:' + s.id, dateISO(s.date)));
+    const dateMv = m => (m.importFacture && dateDoc.get('f:' + m.importFacture)) || (m.importShift && dateDoc.get('s:' + m.importShift)) || m.jour;
+    // Mouvements encodés après la date (ceux d'avant ne peuvent pas être datés après)
+    const snap = await db.collection('mouvements').where('jour', '>', d).get({ source: 'server' });
+    const delta = new Map(), achatsApres = new Set();
+    let nb = 0;
+    snap.forEach(doc => {
+      const m = doc.data();
+      if (m.annulee || !(dateMv(m) > d)) return;
+      delta.set(m.code, (delta.get(m.code) || 0) + m.quantite);
+      if (m.type === 'entree') achatsApres.add(m.code);
+      nb++;
+    });
+    // Prix d'achat à la date : dernier achat daté au plus tard ce jour-là
+    const prix = new Map();
+    for (const code of achatsApres) {
+      const s2 = await db.collection('mouvements').where('code', '==', code).get();
+      let best = null;
+      s2.forEach(x => { const m = x.data(); if (m.type === 'entree' && !m.annulee && dateMv(m) <= d && (!best || ms(m.le) > ms(best.le))) best = m; });
+      prix.set(code, best ? best.prixUnitaireHT : null);
+    }
+    const ordre = Object.keys(CATEGORIES);
+    const lignes = [...catalogue.values()].map(p => {
+      const q = arrondi((p.stock || 0) - (delta.get(p.code) || 0), 3);
+      const pu = prix.has(p.code) ? prix.get(p.code) : (p.dernierPrixHT != null ? p.dernierPrixHT : null);
+      return { code: p.code, description: p.description || '', codeRapport: p.codeRapport || '0000', tvaPct: p.tvaPct != null ? p.tvaPct : null,
+        q, pu, valeur: pu != null && q > 0 ? arrondi(q * pu, 2) : 0 };
+    }).filter(l => l.q !== 0).sort((a, b) => {
+      const ca = ordre.indexOf(a.codeRapport), cb = ordre.indexOf(b.codeRapport);
+      return (ca < 0 ? 99 : ca) - (cb < 0 ? 99 : cb) || String(a.description).localeCompare(String(b.description), 'fr', { sensitivity: 'base' });
+    });
+    const total = arrondi(lignes.reduce((s, l) => s + l.valeur, 0), 2);
+    const nbArticles = lignes.filter(l => l.q > 0).length;
+    const deja = inventairesListe.find(x => x.id === d);
+    $('iaApercu').innerHTML = '<div class="apercu">Stock au <b>' + dateBelge(d) + '</b> : <b>' + euro(total) + ' HT</b>, ' + nbArticles + ' article(s) en stock.<br>' +
+      '<span class="aide">Stock actuel moins ' + nb + ' mouvement(s) datés après le ' + dateBelge(d) + ' (ventes, achats, comptages…). Prix d\'achat connus à cette date.</span></div>' +
+      (sessionComptage ? '<div class="alerte">Un inventaire rapide est en cours : clôturez-le d\'abord si les quantités comptées doivent entrer dans cet inventaire.</div>' : '') +
+      (deja ? '<div class="alerte">Un inventaire au ' + dateBelge(d) + ' est déjà enregistré (' + euro(deja.total) + ' HT) : il sera remplacé.</div>' : '') +
+      '<div class="deux" style="margin-top:8px"><button class="btn second" id="iaVoir">Voir le relevé</button><button class="btn" id="iaEnreg">Enregistrer</button></div>';
+    const inv = { date: d, lignes, total, nbArticles, nbMouvementsApres: nb };
+    $('iaVoir').onclick = () => {
+      inventaireArrete = Object.assign({ par: utilisateur, le: null, provisoire: true }, inv);
+      renderCarteArrete();
+      renderInventaire();
+      window.scrollTo(0, 0);
+    };
+    $('iaEnreg').onclick = () => enregistrerArrete(inv);
+  } catch (e) {
+    console.error(e);
+    $('iaApercu').innerHTML = '<div class="alerte">Calcul impossible : ' + esc(e.code || e.message) + '</div>';
+  }
+}
+async function enregistrerArrete(inv) {
+  const d = inv.date;
+  if (!confirm('Enregistrer l\'inventaire arrêté au ' + dateBelge(d) + ' (' + euro(inv.total) + ' HT) ?\n\nIl restera consultable et imprimable, même les années suivantes.')) return;
+  try {
+    await db.collection('inventaires').doc(d).set({ date: d, lignes: inv.lignes, total: inv.total, nbArticles: inv.nbArticles,
+      nbMouvementsApres: inv.nbMouvementsApres, par: utilisateur, le: firebase.firestore.FieldValue.serverTimestamp() });
+    toast('Inventaire au ' + dateBelge(d) + ' enregistré');
+    inventaireArrete = null;
+    renderCarteArrete();
+    renderInventaire();
+  } catch (e) { toast('Enregistrement refusé : ' + (e.code || e.message), 'ko'); }
+}
+// Lignes affichées dans le relevé : inventaire arrêté ou stock actuel
+function lignesAffichees(inclureZero) {
+  if (!inventaireArrete) return lignesInventaire(inclureZero);
+  return inventaireArrete.lignes.filter(l => inclureZero || l.q !== 0).map(l => ({ p: { code: l.code, description: l.description, codeRapport: l.codeRapport, tvaPct: l.tvaPct, stock: l.q, dernierFournisseur: '' }, q: l.q, pu: l.pu, valeur: l.valeur }));
+}
+// ============================================================
 //  CATALOGUE
 // ============================================================
 // Codes rapport présents : catégories connues + codes portés par des produits, dans l'ordre des codes
@@ -3142,7 +3450,8 @@ function lignesInventaire(inclureZero) {
 
 function renderInventaire() {
   if ($('ongletInventaire').classList.contains('cache')) return;
-  const lignes = lignesInventaire($('iZero').checked);
+  const ia = inventaireArrete;
+  const lignes = lignesAffichees($('iZero').checked);
   let total = 0, unites = 0, articles = 0;
   const parTva = {};
   const sansPrix = [], negatifs = [];
@@ -3159,15 +3468,18 @@ function renderInventaire() {
 
   let html =
     '<div class="entreprise">' + ENTREPRISE.map(esc).join('<br>') + '</div>' +
-    '<h2 class="titre-inv">Relevé d\'inventaire du shop</h2>' +
-    '<div class="aide">Établi le ' + new Date().toLocaleString('fr-BE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) +
-      ' par ' + esc(utilisateur) + ' · valorisation au dernier prix d\'achat HT connu</div>' +
+    '<h2 class="titre-inv">Relevé d\'inventaire du shop' + (ia ? ' au ' + esc(dateBelge(ia.date)) : '') + '</h2>' +
+    (ia
+      ? '<div class="aide">Stock arrêté au ' + esc(dateBelge(ia.date)) + (ia.provisoire ? ' · aperçu NON ENREGISTRÉ' : ' · enregistré le ' + dateTexte(ia.le) + ' par ' + esc(ia.par)) +
+        ' · valorisation au dernier prix d\'achat HT connu à cette date</div>'
+      : '<div class="aide">Établi le ' + new Date().toLocaleString('fr-BE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) +
+        ' par ' + esc(utilisateur) + ' · valorisation au dernier prix d\'achat HT connu</div>') +
     '<div class="chiffres">' +
       '<div><span>Valeur totale HT</span><b>' + euro(total) + '</b></div>' +
       '<div><span>Articles en stock</span><b>' + articles + '</b></div>' +
       '<div><span>Unités</span><b>' + fmtQte(unites) + '</b></div>' +
     '</div>' +
-    lignePertes() +
+    (ia ? '' : lignePertes()) +
     '<table class="inv"><thead><tr><th>Taux de TVA</th><th class="n">Valeur HT</th></tr></thead><tbody>' +
       Object.keys(parTva).sort((a, b) => Number(a) - Number(b)).map(t =>
         '<tr><td>TVA ' + esc(t) + ' %</td><td class="n">' + euro(arrondi(parTva[t], 2)) + '</td></tr>').join('') +
@@ -3240,11 +3552,11 @@ $('iExporter').addEventListener('click', () => {
   const num = v => v == null ? '' : String(v).replace('.', ',');
   const txt = v => String(v == null ? '' : v).replace(/;/g, ',');
   const l = [['code', 'description', 'categorie', 'tva_pct', 'quantite', 'prix_unitaire_ht', 'valeur_ht', 'dernier_fournisseur'].join(';')];
-  lignesInventaire($('iZero').checked).forEach(x => l.push([
+  lignesAffichees($('iZero').checked).forEach(x => l.push([
     '="' + x.p.code + '"', txt(x.p.description), txt(libCategorie(x.p.codeRapport || '0000')), num(x.p.tvaPct),
     num(x.q), num(x.pu), num(x.q > 0 && x.pu != null ? x.valeur : 0), txt(x.p.dernierFournisseur)
   ].join(';')));
-  telecharger('inventaire_shop_' + jourLocal() + '.csv', '﻿' + l.join('\r\n'), 'text/csv;charset=utf-8');
+  telecharger('inventaire_shop_' + (inventaireArrete ? 'au_' + inventaireArrete.date : jourLocal()) + '.csv', '﻿' + l.join('\r\n'), 'text/csv;charset=utf-8');
 });
 
 // ============================================================
@@ -3640,10 +3952,11 @@ async function sauvegarder(motif) {
   const correspondances = await lire('correspondances');
   const alias = await lire('alias');
   const comptages = await lire('comptages');
+  const inventaires = await lire('inventaires');
   const produits = [...catalogue.entries()].map(([id, p]) => Object.assign({ id }, versJSON(p)));
   const contenu = JSON.stringify({
     application: 'Stock Shop Paliseul', version: VERSION, date: new Date().toISOString(), par: utilisateur,
-    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises, lots, factures, shifts, correspondances, alias, comptages
+    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises, lots, factures, shifts, correspondances, alias, comptages, inventaires
   }, null, 1);
   const heure = new Date().toTimeString().slice(0, 5).replace(':', 'h');
   telecharger('sauvegarde_stock_shop_' + jourLocal() + '_' + heure + '.json', contenu, 'application/json');
@@ -3934,7 +4247,13 @@ function guideHTML() {
   '<li><b>Exporter (CSV)</b> : pour Excel ou le comptable.</li>' +
   '<li>Les produits en stock <b>sans prix d\'achat</b> comptent pour 0 € et sont signalés : encodez une entrée pour leur donner un prix.</li>' +
   '<li>Le tableau <b>Sorties de stock</b> de l\'année (périmés, casse, consommation interne, vol…) donne les unités et la valeur HT par motif.</li>' +
-  '<li>En haut de l\'onglet : la carte <b>Inventaire rapide</b> pour compter le shop (voir rubrique 5). Elle n\'est pas imprimée.</li></ul></details>' +
+  '<li>En haut de l\'onglet : la carte <b>Inventaire rapide</b> pour compter le shop (voir rubrique 5). Elle n\'est pas imprimée.</li></ul>' +
+  '<p><b>Inventaire arrêté (clôture annuelle)</b> : carte « Inventaire arrêté » de l\'onglet Inventaire.</p><ol>' +
+  '<li>Choisissez la date (en janvier, le 31/12 de l\'année précédente est proposé) puis <b>Calculer</b>.</li>' +
+  '<li>L\'appli part du stock actuel et retire tout ce qui s\'est passé après cette date : ventes, achats, comptages, sorties. Pour une facture ou un shift, c\'est la <b>date du document</b> qui compte : le shift du 31/12 importé le 2/1 est bien compté dans l\'année. Le prix d\'achat est celui connu à cette date.</li>' +
+  '<li><b>Voir le relevé</b> l\'affiche à la place du stock actuel (aperçu non enregistré). <b>Enregistrer</b> le garde pour toujours.</li>' +
+  '<li>Les inventaires enregistrés sont listés dans la carte : <b>Voir / imprimer</b>, puis Imprimer / PDF ou Exporter (CSV). « Revenir au stock actuel » pour quitter.</li></ol>' +
+  '<div class="astuce">Faites le comptage (Inventaire rapide) le 31/12 ou dans les premiers jours de janvier, clôturez-le, importez les shifts et factures jusqu\'à ce jour-là, puis calculez l\'inventaire au 31/12.</div></details>' +
 
   '<details><summary>10. Catégories (codes rapport)</summary>' +
   '<p>Outils → <b>Catégories</b> : renommez une catégorie, changez son nom abrégé (filtres) ou sa TVA par défaut, ou ajoutez-en une avec son code rapport FuelPOS. La TVA par défaut ne s\'applique qu\'aux nouveaux produits.</p></details>' +
@@ -3962,7 +4281,7 @@ function guideHTML() {
   '<li><b>Supprimer définitivement</b> (test, erreur, mauvais fichier) : une sauvegarde est téléchargée, puis l\'import, ses lignes et ses dates de péremption sont effacés. Laissez cochée « Corriger le stock » pour retirer ce que l\'import avait ajouté ou déduit ; <b>décochez-la</b> si le stock a été remis à zéro ou recompté depuis. Confirmez en tapant SUPPRIMER.</li>' +
   '<li><b>Décider plus tard</b> : l\'import attend dans Outils → « Imports à classer », avec les boutons Conserver et Supprimer.</li></ul>' +
   '<p><b>Historique des imports</b> (bouton dans Outils) : années et mois avec le nombre de factures et le total des achats HT, le nombre de shifts et le total des ventes TTC. Filtres Factures / Shifts, recherche par numéro ou fournisseur. Touchez un import pour voir ses lignes. ✅ = valide ; ↩️ et « annulé » en gris = annulé.</p>' +
-  '<p><b>Annuler</b> un import classé (erreur découverte plus tard) : le stock est corrigé et l\'import reste visible, barré. Si des stocks passaient sous 0, l\'appli prévient avant.</p>' +
+  '<p><b>Annuler</b> un import classé (erreur découverte plus tard) : le stock est corrigé, le prix d\'achat redevient celui de l\'achat précédent, et l\'import reste visible, barré. Si des stocks passaient sous 0, l\'appli prévient avant.</p>' +
   '<div class="astuce">Une même facture (fournisseur + n°) ou un même shift ne peut être importé qu\'une fois. En cas d\'erreur : <b>Supprimer</b> s\'il n\'est pas encore classé, sinon <b>Annuler</b> dans l\'historique des imports. Il faut avoir fait le <b>comptage de départ</b> avant d\'importer des ventes, sinon les stocks deviennent négatifs.</div></details>' +
 
   '<details><summary>13. Remise à zéro du stock</summary>' +
@@ -3973,11 +4292,16 @@ function guideHTML() {
   '<div class="astuce">Usage typique : remettre une catégorie à zéro, puis la compter produit par produit (Comptage).</div></details>' +
 
   '<details><summary>14. Sauvegarde</summary>' +
-  '<p>Outils → <b>Sauvegarde complète</b> télécharge toutes les données dans un fichier. Faites-en une par mois et gardez-la sur le PC.</p></details>' +
+  '<p>Outils → <b>Sauvegarde complète</b> télécharge toutes les données dans un fichier. Faites-en une par mois et gardez-la sur le PC.</p>' +
+  '<p><b>Restaurer</b> (après une grosse erreur) : Outils → <b>Restaurer une sauvegarde</b> → choisissez le fichier .json. L\'aperçu montre les stocks qui changent, les fiches remises et les produits recréés. Tapez RESTAURER pour confirmer.</p>' +
+  '<ul><li>Stocks, prix d\'achat, infos des fiches, catégories et codes secondaires redeviennent ceux de la sauvegarde.</li>' +
+  '<li>Les produits créés après la sauvegarde sont gardés tels quels.</li>' +
+  '<li>Rien n\'est effacé : chaque écart de stock apparaît dans l\'historique du produit (« Restauration »), annulable. Une sauvegarde de l\'état actuel est téléchargée juste avant.</li></ul></details>' +
 
   '<details><summary>15. Questions fréquentes</summary>' +
   '<p><b>La caméra ne s\'ouvre pas ?</b> Autorisez la caméra pour le site dans Chrome (cadenas à gauche de l\'adresse).</p>' +
   '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres : sur l\'écran « Nouveau produit », utilisez « C\'est un article déjà dans la liste ? » pour rattacher le nouveau code (rubrique 3).</p>' +
+  '<p><b>Un inventaire rapide est en cours et je dois importer une facture ou un shift ?</b> Clôturez d\'abord le comptage, sinon les quantités comptées ne tiennent pas compte de l\'import. L\'appli prévient.</p>' +
   '<p><b>Un produit a disparu du Catalogue ?</b> Il a peut-être été retiré : Outils → Produits retirés du catalogue.</p>' +
   '<p><b>L\'appli ne montre pas la dernière version ?</b> Fermez-la complètement et rouvrez-la. Le numéro de version est en haut à côté du titre.</p>' +
   '<p><b>Le stock d\'un produit est négatif ?</b> C\'est impossible en réalité : une vente a été importée avant la facture, le comptage de départ était faux, ou une quantité a été retirée deux fois. Faites un comptage pour le corriger. L\'appli prévient avant une sortie, une annulation ou une suppression qui rendrait un stock négatif (pas pour les ventes de shift, qui passent telles quelles).</p></details>' +
