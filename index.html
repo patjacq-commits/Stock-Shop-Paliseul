@@ -90,6 +90,11 @@ label{display:block;font-size:13px;font-weight:600;color:var(--gris);margin:10px
 .badge.orange{background:#fdf0e1;color:#9a5a12}
 .badge.gris{background:#eceff1;color:#6b7280}
 .cat-liste li.annulee .desc{opacity:.55}
+.boutons-col{display:flex;flex-direction:column;gap:6px}
+details.annee>summary{font-size:16px;padding:8px 0}
+details.mois{margin:4px 0 4px 8px}
+details.mois>summary{font-weight:600;padding:6px 0}
+#hiListe .cat-liste li{cursor:pointer}
 .puces{flex-wrap:wrap}
 .liste li.groupe{display:block;cursor:default;background:#eef3fa;border-radius:8px;border-bottom:0;margin-top:12px;padding:8px 10px}
 .liste li.groupe:first-child{margin-top:0}
@@ -322,8 +327,9 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
           <button class="btn second" id="mvAnnuler">Annuler</button>
           <button class="btn" id="mvConfirmer">Confirmer l'import</button>
         </div>
-        <h3 style="font-size:14px;margin:16px 0 4px">Derniers imports</h3>
-        <ul class="cat-liste" id="mvHistorique"><li class="aide">Aucun import pour l'instant.</li></ul>
+        <h3 style="font-size:14px;margin:16px 0 4px">Imports à classer</h3>
+        <ul class="cat-liste" id="mvHistorique"><li class="aide">Rien à classer.</li></ul>
+        <button class="btn second plein" id="mvVoirHist" style="margin-top:10px">📁 Historique des imports <span id="mvNbClasses"></span></button>
       </div>
       <div class="carte">
         <h2>Ventes de shift : lignes ignorées</h2>
@@ -416,11 +422,18 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.5.1';
+const VERSION = 'v0.5.2';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.5.2', date: '29/10/2026', points: [
+    'Après chaque import de facture ou de shift, l\'appli demande : « Conserver dans l\'historique » ou « Supprimer définitivement » (test ou erreur).',
+    'Outils → « Imports à classer » : les imports pas encore décidés, avec Conserver et Supprimer.',
+    'Historique des imports classé par année et par mois, avec totaux (achats HT, ventes TTC), filtres, recherche et détail des lignes.',
+    'Suppression définitive : sauvegarde automatique, choix de corriger ou non le stock (utile après une remise à zéro), confirmation en tapant SUPPRIMER.',
+    'Avertissement quand une sortie, une annulation ou une suppression ferait passer un stock sous 0.'
+  ] },
   { v: 'v0.5.1', date: '29/10/2026', points: [
     'Inventaire rapide (onglet Inventaire) : on compte le shop ou un code rapport en scannant, à plusieurs téléphones ; le stock n\'est corrigé qu\'à la clôture, avec le résumé des écarts.',
     'Sortie de stock avec motif dans la fiche produit : casse, périmé, consommation interne, vol, retour fournisseur… Le total de l\'année par motif apparaît dans l\'Inventaire.',
@@ -1513,7 +1526,10 @@ function renderHistorique() {
 function annulerMouvement(id) {
   const m = (historiqueCourant || []).find(x => x.id === id);
   if (!m || m.annulee) return;
-  if (!confirm('Annuler ce mouvement (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ') ?\n\nIl restera visible, barré, et le stock sera corrigé.')) return;
+  const pm = catalogue.get(m.code);
+  const apres = arrondi((pm ? pm.stock || 0 : 0) - m.quantite, 3);
+  if (!confirm('Annuler ce mouvement (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ') ?\n\nIl restera visible, barré, et le stock sera corrigé.' +
+    (apres < 0 ? '\n\n⚠️ Le stock passerait à ' + fmtQte(apres) + ' (négatif). A-t-il été recompté ou remis à zéro depuis ?' : ''))) return;
   const FV = firebase.firestore.FieldValue;
   const lot = db.batch();
   lot.update(db.collection('mouvements').doc(id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
@@ -1820,16 +1836,18 @@ function ecouterImports() {
     $('vIgnPlu').value = reglagesVentes.pluIgnores.join(', ');
   }, err => console.warn('Réglages ventes', err.code));
   if (desabonnerFactures) desabonnerFactures();
-  desabonnerFactures = db.collection('factures').orderBy('le', 'desc').limit(10).onSnapshot(snap => {
+  desabonnerFactures = db.collection('factures').onSnapshot(snap => {
     facturesRecentes = [];
     snap.forEach(d => facturesRecentes.push(Object.assign({ id: d.id, genre: 'facture' }, d.data({ serverTimestamps: 'estimate' }))));
     renderImportsRecents();
+    renderHistoriqueImports();
   }, err => console.warn('Factures', err.code));
   if (desabonnerShifts) desabonnerShifts();
-  desabonnerShifts = db.collection('shifts').orderBy('le', 'desc').limit(10).onSnapshot(snap => {
+  desabonnerShifts = db.collection('shifts').onSnapshot(snap => {
     shiftsRecents = [];
     snap.forEach(d => shiftsRecents.push(Object.assign({ id: d.id, genre: 'shift' }, d.data({ serverTimestamps: 'estimate' }))));
     renderImportsRecents();
+    renderHistoriqueImports();
   }, err => console.warn('Shifts', err.code));
 }
 function arreterImports() {
@@ -1886,11 +1904,14 @@ $('mvConfirmer').addEventListener('click', async () => {
   const btn = $('mvConfirmer');
   btn.disabled = true; btn.textContent = 'Import en cours…';
   try {
-    const r = mvEnAttente.genre === 'facture' ? await executerFacture(mvEnAttente) : await executerVentes(mvEnAttente);
+    const p = mvEnAttente;
+    const r = p.genre === 'facture' ? await executerFacture(p) : await executerVentes(p);
     annulerMv();
     $('mvApercu').innerHTML = '<div class="resultat ok">' + r + '</div>';
     $('mvFichier').value = '';
-    toast('Import terminé');
+    const liste = p.genre === 'facture' ? [['facture', p.id]] : p.shifts.map(s => ['shift', cleDoc(s.numero)]);
+    const noms = p.genre === 'facture' ? 'la facture ' + p.numero + ' (' + p.fournisseur + ')' : (p.shifts.length > 1 ? 'ces ' + p.shifts.length + ' shifts' : 'le shift ' + p.shifts[0].numero);
+    demanderClassement(liste, noms, r);
   } catch (e) {
     console.error(e);
     toast('Import impossible : ' + (e.code || e.message), 'ko');
@@ -2133,32 +2154,297 @@ function dateBelge(s) {
   if (m) return m[1].padStart(2, '0') + '/' + m[2].padStart(2, '0') + '/' + (m[3].length === 2 ? '20' + m[3] : m[3]);
   return s;
 }
+// ---------- Imports : à classer, historique (année > mois), suppression définitive ----------
+// classement : absent = « à classer » ; 'conserve' = classé dans l'historique (ne peut plus être supprimé)
+const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+let filtreHist = { genre: 'tous', q: '' };
+
+function tousImports() {
+  return facturesRecentes.concat(shiftsRecents);
+}
+function trouverImport(genre, id) {
+  return (genre === 'facture' ? facturesRecentes : shiftsRecents).find(y => y.id === id);
+}
+function nomImport(x) {
+  return x.genre === 'facture' ? 'Facture ' + x.numero + ' · ' + x.fournisseur : 'Shift ' + x.numero;
+}
+// Mois de classement : date du document, sinon date d'import → « 2026-10 »
+function moisImport(x) {
+  const d = dateBelge(x.date).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (d) return d[3] + '-' + d[2];
+  const t = new Date(ms(x.le) || Date.now());
+  return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0');
+}
+function ligneImport(x, boutons) {
+  return '<li class="' + (x.annulee ? 'annulee' : '') + '" data-voir="' + esc(x.genre) + ':' + esc(x.id) + '"><div class="desc"><b>' + (x.annulee ? '↩️ ' : '✅ ') + esc(nomImport(x)) + '</b>' +
+    (x.annulee ? ' <span class="badge gris">annulé</span>' : '') + '<br>' +
+    '<span class="aide">' + (x.date ? esc(dateBelge(x.date)) + ' · ' : '') + (x.genre === 'facture' ? x.lignes + ' ligne(s), ' + euro(x.totalHT) + ' HT' : x.articles + ' article(s), ' + euro(x.montantTTC) + ' TTC') +
+    ' · importé le ' + dateTexte(x.le) + ' par ' + esc(x.par) + (x.annulee ? ' · annulé par ' + esc(x.annuleePar) : '') + '</span></div>' +
+    (boutons || '') + '</li>';
+}
+
+// Outils : imports à classer
 function renderImportsRecents() {
   const ul = $('mvHistorique');
   if (!ul) return;
-  const l = facturesRecentes.concat(shiftsRecents).sort((a, b) => ms(b.le) - ms(a.le)).slice(0, 12);
-  if (!l.length) { ul.innerHTML = '<li class="aide">Aucun import pour l\'instant.</li>'; return; }
-  ul.innerHTML = l.map(x => '<li class="' + (x.annulee ? 'annulee' : '') + '"><div class="desc"><b>' + (x.annulee ? '↩️ ' : '✅ ') + (x.genre === 'facture' ? 'Facture ' + esc(x.numero) + ' · ' + esc(x.fournisseur) : 'Shift ' + esc(x.numero)) + '</b>' +
-    (x.annulee ? ' <span class="badge gris">annulé</span>' : '') + '<br>' +
-    '<span class="aide">' + (x.date ? esc(dateBelge(x.date)) + ' · ' : '') + (x.genre === 'facture' ? x.lignes + ' ligne(s), ' + euro(x.totalHT) + ' HT' : x.articles + ' article(s), ' + euro(x.montantTTC) + ' TTC') +
-    ' · ' + dateTexte(x.le) + ' · ' + esc(x.par) + (x.annulee ? ' · annulé par ' + esc(x.annuleePar) : '') + '</span></div>' +
-    (x.annulee ? '' : '<button class="btn second petit" data-imp="' + esc(x.genre) + ':' + esc(x.id) + '">Annuler</button>') + '</li>').join('');
+  const l = tousImports().filter(x => x.classement !== 'conserve').sort((a, b) => ms(b.le) - ms(a.le));
+  const classes = tousImports().length - l.length;
+  $('mvNbClasses').textContent = classes ? '(' + classes + ' classé(s))' : '';
+  ul.innerHTML = l.length ? l.map(x => ligneImport(x,
+    '<div class="boutons-col"><button class="btn petit" data-classer="' + esc(x.genre) + ':' + esc(x.id) + '">Conserver</button>' +
+    '<button class="btn danger petit" data-supprimer="' + esc(x.genre) + ':' + esc(x.id) + '">Supprimer</button></div>')).join('')
+    : '<li class="aide">Rien à classer.</li>';
 }
 $('mvHistorique').addEventListener('click', e => {
-  const b = e.target.closest('[data-imp]');
-  if (b) { const [genre, id] = b.dataset.imp.split(':'); annulerImport2(genre, id); }
+  const c = e.target.closest('[data-classer]');
+  if (c) { classerImports([c.dataset.classer.split(':')]); return; }
+  const s = e.target.closest('[data-supprimer]');
+  if (s) { ouvrirSuppression([s.dataset.supprimer.split(':')]); return; }
+  const v = e.target.closest('[data-voir]');
+  if (v) { const [g, id] = v.dataset.voir.split(':'); ouvrirDetailImport(g, id, false); }
 });
+$('mvVoirHist').addEventListener('click', ouvrirHistoriqueImports);
+
+function classerImports(liste) {
+  const FV = firebase.firestore.FieldValue;
+  const lot = db.batch();
+  liste.forEach(([g, id]) => lot.update(db.collection(g === 'facture' ? 'factures' : 'shifts').doc(id), { classement: 'conserve', classePar: utilisateur, classeLe: FV.serverTimestamp() }));
+  lot.commit().catch(e => toast('Classement refusé : ' + (e.code || e.message), 'ko'));
+  toast(liste.length > 1 ? liste.length + ' imports classés dans l\'historique' : 'Classé dans l\'historique');
+}
+
+// Question posée juste après un import ; liste = [[genre, id], …], noms = texte affiché
+function demanderClassement(liste, noms, resultat) {
+  arreterCamera();
+  nettoyerFiche();
+  ficheCourante = null;
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>Import terminé</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<div class="resultat ok">' + resultat + '</div>' +
+    '<p>Que faire de <b>' + esc(noms) + '</b> ?</p>' +
+    '<button class="btn plein" id="dcGarder">📁 Conserver dans l\'historique</button>' +
+    '<p class="aide" style="margin-top:4px">Classé par mois et par année. Il ne pourra plus être supprimé, seulement annulé.</p>' +
+    '<button class="btn danger plein" id="dcSuppr" style="margin-top:8px">🗑 Supprimer définitivement (test ou erreur)</button>' +
+    '<p class="aide" style="margin-top:4px">Tout est effacé après une sauvegarde ; le stock peut être corrigé.</p>' +
+    '<button class="lien" id="dcPlusTard">Décider plus tard (reste « à classer » dans Outils)</button>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  $('dcPlusTard').onclick = fermerFiche;
+  $('dcGarder').onclick = () => { classerImports(liste); fermerFiche(); };
+  $('dcSuppr').onclick = () => ouvrirSuppression(liste);
+}
+
+// ---------- Mouvements d'un import (lus sur le serveur) ----------
+async function mouvementsImport(genre, id) {
+  const snap = await db.collection('mouvements').where(genre === 'facture' ? 'importFacture' : 'importShift', '==', id).get({ source: 'server' });
+  const l = [];
+  snap.forEach(d => l.push(Object.assign({ id: d.id }, d.data())));
+  return l;
+}
+// Produits dont le stock passerait sous 0 si on retire ces mouvements
+function stocksNegatifs(mv) {
+  const delta = new Map();
+  mv.filter(m => !m.annulee).forEach(m => delta.set(m.code, (delta.get(m.code) || 0) - m.quantite));
+  const l = [];
+  delta.forEach((d, code) => {
+    const p = catalogue.get(code);
+    const apres = arrondi((p ? p.stock || 0 : 0) + d, 3);
+    if (d < 0 && apres < 0) l.push({ desc: p ? p.description : code, avant: p ? p.stock || 0 : 0, apres });
+  });
+  return l;
+}
+function texteNegatifs(l) {
+  return l.slice(0, 8).map(x => '• ' + x.desc + ' : ' + fmtQte(x.avant) + ' → ' + fmtQte(x.apres)).join('\n') + (l.length > 8 ? '\n• … et ' + (l.length - 8) + ' autre(s)' : '');
+}
+
+// ---------- Suppression définitive ----------
+async function ouvrirSuppression(liste) {
+  const imports = liste.map(([g, id]) => trouverImport(g, id)).filter(Boolean);
+  if (!imports.length) return;
+  if (imports.some(x => x.classement === 'conserve')) { toast('Un import classé dans l\'historique ne peut plus être supprimé.', 'warn'); return; }
+  if (!navigator.onLine) { toast('La suppression demande une connexion.', 'warn'); return; }
+  arreterCamera();
+  nettoyerFiche();
+  ficheCourante = null;
+  $('fenetre').innerHTML = '<div class="tete"><h2>Supprimer définitivement</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div><p class="aide">Lecture des lignes…</p>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  let mv = [];
+  try {
+    for (const x of imports) mv = mv.concat(await mouvementsImport(x.genre, x.id));
+  } catch (e) { toast('Lecture impossible : ' + (e.code || e.message), 'ko'); fermerFiche(); return; }
+  const actifs = mv.filter(m => !m.annulee);
+  const neg = stocksNegatifs(mv);
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>Supprimer définitivement</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<p><b>' + imports.map(x => esc(nomImport(x))).join('<br>') + '</b></p>' +
+    '<p class="aide" style="margin-top:0">' + mv.length + ' ligne(s) et leurs dates de péremption seront effacées. Les produits créés restent dans le catalogue. Une sauvegarde complète est téléchargée juste avant.</p>' +
+    (actifs.length
+      ? '<label class="coche"><input type="checkbox" id="spStock" checked> Corriger le stock (retirer ce que cet import a ajouté ou déduit)</label>' +
+        '<p class="aide" style="margin-top:0">Décochez si le stock a déjà été remis à zéro ou recompté depuis cet import.</p>' +
+        (neg.length ? '<div class="alerte">⚠️ Avec la correction, ' + neg.length + ' produit(s) passeraient sous 0 :<ul>' +
+          neg.slice(0, 8).map(x => '<li>' + esc(x.desc) + ' : ' + fmtQte(x.avant) + ' → <b>' + fmtQte(x.apres) + '</b></li>').join('') + '</ul>Stock déjà remis à zéro ? Décochez la case.</div>' : '')
+      : '<p class="aide">Import déjà annulé : le stock ne change pas.</p>') +
+    '<label for="spMot">Pour confirmer, tapez SUPPRIMER</label>' +
+    '<input type="text" id="spMot" autocomplete="off" autocapitalize="characters">' +
+    '<div class="actions"><button class="btn second" id="spNon">Retour</button><button class="btn danger" id="spOk">Supprimer</button></div>';
+  $('fX').onclick = fermerFiche;
+  $('spNon').onclick = fermerFiche;
+  $('spOk').onclick = () => {
+    if ($('spMot').value.trim().toUpperCase() !== 'SUPPRIMER') { toast('Tapez SUPPRIMER pour confirmer.', 'warn'); $('spMot').focus(); return; }
+    executerSuppression(imports, mv, !!($('spStock') && $('spStock').checked));
+  };
+}
+
+async function executerSuppression(imports, mv, corriger) {
+  const FV = firebase.firestore.FieldValue;
+  $('spOk').disabled = true;
+  try {
+    await sauvegarder('avant suppression de ' + imports.map(nomImport).join(', '));
+    // 1. Annulation (le stock n'est corrigé que si demandé)
+    const actifs = mv.filter(m => !m.annulee);
+    for (let i = 0; i < actifs.length; i += 150) {
+      const lot = db.batch();
+      actifs.slice(i, i + 150).forEach(m => {
+        lot.update(db.collection('mouvements').doc(m.id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
+        if (corriger) lot.update(db.collection('produits').doc(m.code), { stock: FV.increment(-m.quantite) });
+      });
+      await lot.commit();
+    }
+    // 2. Lots de péremption liés : marqués annulés puis effacés
+    const lots = [...new Set(mv.map(m => m.lotPeremption).filter(Boolean))];
+    for (let i = 0; i < lots.length; i += 200) {
+      const lot = db.batch();
+      lots.slice(i, i + 200).forEach(id => lot.update(db.collection('lots').doc(id), { statut: 'annule', closPar: utilisateur, closLe: FV.serverTimestamp() }));
+      await lot.commit();
+    }
+    for (let i = 0; i < lots.length; i += 200) {
+      const lot = db.batch();
+      lots.slice(i, i + 200).forEach(id => lot.delete(db.collection('lots').doc(id)));
+      await lot.commit();
+    }
+    // 3. Lignes, puis le document de l'import
+    for (let i = 0; i < mv.length; i += 200) {
+      const lot = db.batch();
+      mv.slice(i, i + 200).forEach(m => lot.delete(db.collection('mouvements').doc(m.id)));
+      await lot.commit();
+    }
+    const lot = db.batch();
+    imports.forEach(x => lot.delete(db.collection(x.genre === 'facture' ? 'factures' : 'shifts').doc(x.id)));
+    await lot.commit();
+    fermerFiche();
+    toast('Supprimé définitivement : ' + mv.length + ' ligne(s)' + (corriger ? ', stock corrigé' : ', stock inchangé'));
+  } catch (e) {
+    console.error(e);
+    toast('Suppression interrompue : ' + (e.code || e.message), 'ko');
+    if ($('spOk')) $('spOk').disabled = false;
+  }
+}
+
+// ---------- Historique des imports (année > mois) ----------
+function ouvrirHistoriqueImports() {
+  arreterCamera();
+  nettoyerFiche();
+  ficheCourante = null;
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>Historique des imports</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<div class="puces" id="hiGenre"><button class="puce" data-g="tous">Tous</button><button class="puce" data-g="facture">Factures</button><button class="puce" data-g="shift">Shifts</button></div>' +
+    '<input type="search" id="hiRecherche" placeholder="N° de facture, fournisseur, n° de shift…" autocomplete="off" style="margin-top:8px" value="' + esc(filtreHist.q) + '">' +
+    '<div id="hiListe"></div>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  $('hiGenre').onclick = e => { const b = e.target.closest('[data-g]'); if (b) { filtreHist.genre = b.dataset.g; renderHistoriqueImports(); } };
+  $('hiRecherche').oninput = () => { filtreHist.q = $('hiRecherche').value; renderHistoriqueImports(); };
+  $('hiListe').onclick = e => {
+    const a = e.target.closest('[data-annimp]');
+    if (a) { const [g, id] = a.dataset.annimp.split(':'); annulerImport2(g, id); return; }
+    const v = e.target.closest('[data-voir]');
+    if (v) { const [g, id] = v.dataset.voir.split(':'); ouvrirDetailImport(g, id, true); }
+  };
+  renderHistoriqueImports();
+}
+function renderHistoriqueImports() {
+  const div = $('hiListe');
+  if (!div) return;
+  document.querySelectorAll('#hiGenre .puce').forEach(b => b.classList.toggle('actif', b.dataset.g === filtreHist.genre));
+  const q = normaliserTexte(filtreHist.q.trim());
+  const l = tousImports().filter(x => x.classement === 'conserve')
+    .filter(x => filtreHist.genre === 'tous' || x.genre === filtreHist.genre)
+    .filter(x => !q || normaliserTexte(nomImport(x)).includes(q));
+  if (!l.length) { div.innerHTML = '<p class="aide">' + (tousImports().some(x => x.classement === 'conserve') ? 'Aucun import pour ce filtre.' : 'Aucun import classé pour l\'instant.') + '</p>'; return; }
+  const parMois = new Map();
+  l.forEach(x => { const m = moisImport(x); if (!parMois.has(m)) parMois.set(m, []); parMois.get(m).push(x); });
+  const mois = [...parMois.keys()].sort().reverse();
+  const anneeCourante = String(new Date().getFullYear());
+  let html = '', annee = null;
+  mois.forEach((m, i) => {
+    const [a, mm] = m.split('-');
+    if (a !== annee) {
+      if (annee !== null) html += '</details>';
+      annee = a;
+      const deLAnnee = l.filter(x => moisImport(x).startsWith(a + '-') && !x.annulee);
+      html += '<details class="bloc annee"' + (a === anneeCourante || i === 0 ? ' open' : '') + '><summary><b>' + a + '</b> <span class="aide">· ' +
+        resumeImports(deLAnnee) + '</span></summary>';
+    }
+    const g = parMois.get(m).sort((x, y) => (moisImport(y) + ms(y.le)).localeCompare(moisImport(x) + ms(x.le)));
+    const valides = g.filter(x => !x.annulee);
+    html += '<details class="mois"' + (i === 0 ? ' open' : '') + '><summary>' + MOIS[Number(mm) - 1].replace(/^./, c => c.toUpperCase()) + ' ' + a + ' <span class="aide">· ' + resumeImports(valides) + '</span></summary>' +
+      '<ul class="cat-liste">' + g.sort((x, y) => ms(y.le) - ms(x.le)).map(x => ligneImport(x,
+        x.annulee ? '' : '<button class="btn second petit" data-annimp="' + esc(x.genre) + ':' + esc(x.id) + '">Annuler</button>')).join('') + '</ul></details>';
+  });
+  html += '</details>';
+  div.innerHTML = html;
+}
+function resumeImports(l) {
+  const f = l.filter(x => x.genre === 'facture'), s = l.filter(x => x.genre === 'shift');
+  const parts = [];
+  if (f.length) parts.push(f.length + ' facture(s), ' + euro(arrondi(f.reduce((t, x) => t + (x.totalHT || 0), 0), 2)) + ' HT');
+  if (s.length) parts.push(s.length + ' shift(s), ' + euro(arrondi(s.reduce((t, x) => t + (x.montantTTC || 0), 0), 2)) + ' TTC');
+  return parts.join(' · ') || 'rien de valide';
+}
+
+// Détail d'un import : ses lignes
+async function ouvrirDetailImport(genre, id, depuisHistorique) {
+  const x = trouverImport(genre, id);
+  if (!x) return;
+  arreterCamera();
+  nettoyerFiche();
+  ficheCourante = null;
+  $('fenetre').innerHTML = '<div class="tete"><h2>' + esc(nomImport(x)) + '</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div><p class="aide">Chargement…</p>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  let mv = [];
+  try { mv = await mouvementsImport(genre, id); } catch (e) { toast('Lecture impossible : ' + (e.code || e.message), 'ko'); }
+  const dates = new Map();
+  await Promise.all([...new Set(mv.map(m => m.lotPeremption).filter(Boolean))].map(async lid => {
+    try { const d = await db.collection('lots').doc(lid).get(); if (d.exists) dates.set(lid, d.data()); } catch (e) { /* hors ligne */ }
+  }));
+  mv.sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr'));
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>' + esc(nomImport(x)) + '</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<ul class="cat-liste">' + ligneImport(x, '') + '</ul>' +
+    '<div class="defile"><table class="inv"><thead><tr><th>Produit</th><th class="n">Qté</th><th class="n">' + (genre === 'facture' ? 'PU HT' : 'TTC') + '</th>' + (genre === 'facture' ? '<th>Péremption</th>' : '') + '</tr></thead><tbody>' +
+    (mv.length ? mv.map(m => '<tr' + (m.annulee ? ' style="opacity:.5;text-decoration:line-through"' : '') + '><td>' + esc(m.description || (catalogue.get(m.code) || {}).description || m.code) + '<br><span class="aide">' + esc(m.code) + '</span></td>' +
+      '<td class="n">' + fmtQte(Math.abs(m.quantite)) + '</td><td class="n">' + (genre === 'facture' ? fmtPU(m.prixUnitaireHT) : euro(m.montantTTC)) + '</td>' +
+      (genre === 'facture' ? '<td>' + (m.lotPeremption && dates.get(m.lotPeremption) ? dateLot(dates.get(m.lotPeremption)) : '—') + '</td>' : '') + '</tr>').join('')
+      : '<tr><td colspan="4" class="aide">Aucune ligne.</td></tr>') +
+    '</tbody></table></div>' +
+    '<div class="actions">' + (depuisHistorique ? '<button class="btn second" id="diRetour">Retour à l\'historique</button>' : '<button class="btn second" id="diRetour">Fermer</button>') + '</div>';
+  $('fX').onclick = fermerFiche;
+  $('diRetour').onclick = depuisHistorique ? ouvrirHistoriqueImports : fermerFiche;
+}
+
 async function annulerImport2(genre, id) {
   const x = (genre === 'facture' ? facturesRecentes : shiftsRecents).find(y => y.id === id);
   if (!x || x.annulee) return;
   if (!navigator.onLine) { toast('L\'annulation demande une connexion.', 'warn'); return; }
   const nom = genre === 'facture' ? 'la facture ' + x.numero + ' (' + x.fournisseur + ')' : 'le shift ' + x.numero;
-  if (!confirm('Annuler ' + nom + ' ?\n\nToutes ses lignes seront annulées et le stock corrigé. Les produits créés restent dans le catalogue.')) return;
   try {
     const FV = firebase.firestore.FieldValue;
-    const snap = await db.collection('mouvements').where(genre === 'facture' ? 'importFacture' : 'importShift', '==', id).get({ source: 'server' });
-    const mv = [];
-    snap.forEach(d => { const m = d.data(); if (!m.annulee) mv.push(Object.assign({ id: d.id }, m)); });
+    const mv = (await mouvementsImport(genre, id)).filter(m => !m.annulee);
+    const neg = stocksNegatifs(mv);
+    if (!confirm('Annuler ' + nom + ' ?\n\nToutes ses lignes seront annulées et le stock corrigé. L\'import reste visible, barré. Les produits créés restent dans le catalogue.' +
+      (neg.length ? '\n\n⚠️ ' + neg.length + ' produit(s) passeraient sous 0 :\n' + texteNegatifs(neg) + '\n\nLe stock a-t-il été remis à zéro ou recompté depuis ? Dans ce cas, n\'annulez pas.' : ''))) return;
     for (let i = 0; i < mv.length; i += 150) {
       const lot = db.batch();
       mv.slice(i, i + 150).forEach(m => {
@@ -2247,7 +2533,9 @@ function sortirStock() {
   const q = lireNombre($('soQte').value);
   if (!q || q <= 0) { toast('Indiquez la quantité à sortir.', 'warn'); return; }
   const motif = $('soMotif').value;
-  if (!confirm('Sortir ' + fmtQte(q) + ' unité(s) de « ' + p.description + ' » (' + MOTIFS_SORTIE[motif] + ') ?')) return;
+  const apres = arrondi((p.stock || 0) - q, 3);
+  if (!confirm('Sortir ' + fmtQte(q) + ' unité(s) de « ' + p.description + ' » (' + MOTIFS_SORTIE[motif] + ') ?' +
+    (apres < 0 ? '\n\n⚠️ Le stock passerait de ' + fmtQte(p.stock || 0) + ' à ' + fmtQte(apres) + ' (négatif). Vérifiez la quantité.' : ''))) return;
   const lot = db.batch();
   const v = mouvementSortie(lot, p, q, motif);
   lot.commit().catch(e => toast('Sortie refusée : ' + (e.code || e.message), 'ko'));
@@ -3669,8 +3957,13 @@ function guideHTML() {
   '<li><b>Confirmer l\'import</b> : le stock, le prix d\'achat, le fournisseur, les dates de péremption et les prix de vente sont mis à jour.</li></ol>' +
   '<p>L\'appli retient la correspondance « référence du fournisseur → produit » pour les factures suivantes.</p>' +
   '<p><b>Ventes de shift</b> : même principe, chaque vente diminue le stock. Les lignes de carburant, de loterie, de cautions et le café sont ignorées ; la liste se règle dans Outils → « Ventes de shift : lignes ignorées ». Les totaux par code rapport sont contrôlés.</p>' +
-  '<p>Dans <b>Derniers imports</b> : ✅ = import enregistré ; ↩️ et « annulé » en gris = import annulé (on peut alors le réimporter). La date du document est au format jour/mois/année.</p>' +
-  '<div class="astuce">Une même facture (fournisseur + n°) ou un même shift ne peut être importé qu\'une fois. En cas d\'erreur, <b>Annuler</b> dans « Derniers imports » annule toutes ses lignes et corrige le stock. Il faut avoir fait le <b>comptage de départ</b> avant d\'importer des ventes, sinon les stocks deviennent négatifs.</div></details>' +
+  '<p><b>Après chaque import</b>, l\'appli demande quoi en faire :</p><ul>' +
+  '<li><b>Conserver dans l\'historique</b> : l\'import est classé par année et par mois (selon la date du document). Il ne peut plus être supprimé, seulement annulé.</li>' +
+  '<li><b>Supprimer définitivement</b> (test, erreur, mauvais fichier) : une sauvegarde est téléchargée, puis l\'import, ses lignes et ses dates de péremption sont effacés. Laissez cochée « Corriger le stock » pour retirer ce que l\'import avait ajouté ou déduit ; <b>décochez-la</b> si le stock a été remis à zéro ou recompté depuis. Confirmez en tapant SUPPRIMER.</li>' +
+  '<li><b>Décider plus tard</b> : l\'import attend dans Outils → « Imports à classer », avec les boutons Conserver et Supprimer.</li></ul>' +
+  '<p><b>Historique des imports</b> (bouton dans Outils) : années et mois avec le nombre de factures et le total des achats HT, le nombre de shifts et le total des ventes TTC. Filtres Factures / Shifts, recherche par numéro ou fournisseur. Touchez un import pour voir ses lignes. ✅ = valide ; ↩️ et « annulé » en gris = annulé.</p>' +
+  '<p><b>Annuler</b> un import classé (erreur découverte plus tard) : le stock est corrigé et l\'import reste visible, barré. Si des stocks passaient sous 0, l\'appli prévient avant.</p>' +
+  '<div class="astuce">Une même facture (fournisseur + n°) ou un même shift ne peut être importé qu\'une fois. En cas d\'erreur : <b>Supprimer</b> s\'il n\'est pas encore classé, sinon <b>Annuler</b> dans l\'historique des imports. Il faut avoir fait le <b>comptage de départ</b> avant d\'importer des ventes, sinon les stocks deviennent négatifs.</div></details>' +
 
   '<details><summary>13. Remise à zéro du stock</summary>' +
   '<ol><li>Outils → <b>Remise à zéro</b> : choisissez un code rapport (ou tous).</li>' +
@@ -3687,7 +3980,7 @@ function guideHTML() {
   '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres : sur l\'écran « Nouveau produit », utilisez « C\'est un article déjà dans la liste ? » pour rattacher le nouveau code (rubrique 3).</p>' +
   '<p><b>Un produit a disparu du Catalogue ?</b> Il a peut-être été retiré : Outils → Produits retirés du catalogue.</p>' +
   '<p><b>L\'appli ne montre pas la dernière version ?</b> Fermez-la complètement et rouvrez-la. Le numéro de version est en haut à côté du titre.</p>' +
-  '<p><b>Le stock d\'un produit est négatif ?</b> Faites un comptage pour le corriger.</p></details>' +
+  '<p><b>Le stock d\'un produit est négatif ?</b> C\'est impossible en réalité : une vente a été importée avant la facture, le comptage de départ était faux, ou une quantité a été retirée deux fois. Faites un comptage pour le corriger. L\'appli prévient avant une sortie, une annulation ou une suppression qui rendrait un stock négatif (pas pour les ventes de shift, qui passent telles quelles).</p></details>' +
 
   '<details><summary>Historique des versions</summary><div class="nouv">' + nouveautesHTML(NOUVEAUTES) + '</div></details>' +
   '<p class="aide" style="margin-top:12px">Version ' + VERSION + '</p>' +
