@@ -1,9 +1,9 @@
 // Service Worker — Stock Shop Paliseul
 // Stratégie Network First : on prend toujours la dernière version en ligne,
 // le cache ne sert que hors connexion. Incrémenter VERSION à chaque livraison.
-const VERSION = 'v0.5.4';
+const VERSION = 'v0.5.5';
 const CACHE = 'stock-shop-' + VERSION;
-const FICHIERS = ['./', './index.html', './manifest.json', './icon-192.png'];
+const FICHIERS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './station.jpg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FICHIERS)).then(() => self.skipWaiting()));

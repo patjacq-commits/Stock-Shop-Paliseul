@@ -7,7 +7,7 @@
 <title>Stock Shop Paliseul</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
 :root{--bleu:#1f3a5f;--bleu2:#2c5282;--rouge:#c8102e;--vert:#2e7d32;--orange:#d9822b;--fond:#f3f5f8;--carte:#fff;--texte:#1d2430;--gris:#6b7480;--bord:#d9dee5}
 *{box-sizing:border-box}
@@ -60,7 +60,9 @@ label{display:block;font-size:13px;font-weight:600;color:var(--gris);margin:10px
 /* Connexion */
 #ecranConnexion{max-width:380px;margin:40px auto;padding:0 14px}
 #ecranConnexion .logo{text-align:center;margin-bottom:16px}
-#ecranConnexion .logo img{width:72px;height:72px;border-radius:16px}
+#ecranConnexion .logo img{width:100%;height:auto;aspect-ratio:900/517;object-fit:cover;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,.15);display:block}
+#entete .barre h1{display:flex;align-items:center;gap:8px}
+#entete .vignette{width:30px;height:30px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.85);flex:none}
 .erreur{color:var(--rouge);font-size:14px;margin-top:8px;min-height:1em}
 .lien{background:none;border:0;color:var(--bleu2);text-decoration:underline;padding:0;margin-top:12px;cursor:pointer;font-size:14px}
 
@@ -230,7 +232,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 
 <!-- Connexion -->
 <div id="ecranConnexion" class="cache">
-  <div class="logo"><img src="icon-192.png" alt=""><h1 style="font-size:20px;margin:10px 0 0">Stock Shop Paliseul</h1></div>
+  <div class="logo"><img src="station.jpg" alt="Station Rolus, Paliseul"><h1 style="font-size:20px;margin:12px 0 0">Stock Shop Paliseul</h1></div>
   <div class="carte">
     <label for="cEmail">Email</label>
     <input type="email" id="cEmail" autocomplete="username">
@@ -246,7 +248,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 <div id="ecranAppli" class="cache">
   <div id="entete">
     <div class="barre">
-      <h1>Stock Shop <span class="version" id="vVersion"></span></h1>
+      <h1><img class="vignette" src="icon-192.png" alt=""><span>Stock Shop <span class="version" id="vVersion"></span></span></h1>
       <div class="etat"><span class="pastille" id="pastille"></span><span id="etatTexte">En ligne</span></div>
       <button class="btn-aide" id="bAide" aria-label="Mode d'emploi" title="Mode d'emploi">?</button>
     </div>
@@ -451,11 +453,14 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.5.4';
+const VERSION = 'v0.5.5';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.5.5', date: '30/10/2026', points: [
+    'La photo de la station Rolus apparaît sur l\'écran de connexion, en petit dans la barre du haut, et comme icône de l\'appli sur le téléphone.'
+  ] },
   { v: 'v0.5.4', date: '29/10/2026', points: [
     'Mode d\'emploi imprimable : bouton « Imprimer / PDF » en haut du mode d\'emploi, toutes les rubriques dépliées, toujours à jour avec la version de l\'appli.'
   ] },
@@ -4190,7 +4195,7 @@ function guideHTML() {
 
   '<details><summary>1. Installer et se connecter</summary>' +
   '<ol><li>Ouvrez l\'adresse de l\'appli dans <b>Chrome</b> sur le téléphone.</li>' +
-  '<li>Menu ⋮ → <b>Ajouter à l\'écran d\'accueil</b> : l\'appli s\'ouvre ensuite comme les autres.</li>' +
+  '<li>Menu ⋮ → <b>Ajouter à l\'écran d\'accueil</b> : l\'appli s\'ouvre ensuite comme les autres, avec la photo de la station comme icône.</li>' +
   '<li>Connectez-vous avec votre email et votre mot de passe. « Mot de passe oublié ? » envoie un email pour le changer.</li></ol>' +
   '<p>La pastille en haut indique <b>En ligne</b> (verte) ou <b>Hors ligne</b> (orange). « synchro… » veut dire que des données attendent d\'être envoyées.</p></details>' +
 
@@ -4324,6 +4329,7 @@ function guideHTML() {
   '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres : sur l\'écran « Nouveau produit », utilisez « C\'est un article déjà dans la liste ? » pour rattacher le nouveau code (rubrique 3).</p>' +
   '<p><b>Un inventaire rapide est en cours et je dois importer une facture ou un shift ?</b> Clôturez d\'abord le comptage, sinon les quantités comptées ne tiennent pas compte de l\'import. L\'appli prévient.</p>' +
   '<p><b>Un produit a disparu du Catalogue ?</b> Il a peut-être été retiré : Outils → Produits retirés du catalogue.</p>' +
+  '<p><b>L\'icône du téléphone n\'a pas changé ?</b> Android garde l\'ancienne icône : appui long sur l\'icône → Supprimer (ou Retirer de l\'écran d\'accueil), puis rouvrez l\'adresse dans Chrome et refaites Menu ⋮ → Ajouter à l\'écran d\'accueil. Les données ne sont pas perdues.</p>' +
   '<p><b>L\'appli ne montre pas la dernière version ?</b> Fermez-la complètement et rouvrez-la. Le numéro de version est en haut à côté du titre.</p>' +
   '<p><b>Le stock d\'un produit est négatif ?</b> C\'est impossible en réalité : une vente a été importée avant la facture, le comptage de départ était faux, ou une quantité a été retirée deux fois. Faites un comptage pour le corriger. L\'appli prévient avant une sortie, une annulation ou une suppression qui rendrait un stock négatif (pas pour les ventes de shift, qui passent telles quelles).</p></details>' +
 
