@@ -187,6 +187,13 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 .guide ul,.guide ol{padding-left:20px;margin:6px 0 10px}
 .guide .astuce{background:#eef3fa;border-radius:8px;padding:8px 10px;font-size:14px;margin:8px 0 10px}
 .guide-impr{display:none}
+.code-lu{background:#eef3fa;border:1px solid #cbd9ec;border-radius:10px;padding:10px 12px;margin:6px 0;font-size:15px}
+.code-lu b{font-size:19px;letter-spacing:1px}
+#fondDate{position:fixed;inset:0;background:rgba(15,25,40,.6);z-index:70;display:flex;align-items:flex-end;justify-content:center}
+.fenetre-date{background:#fff;width:100%;max-width:560px;max-height:94vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:16px}
+.zone-date{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3}
+.zone-date video{width:100%;height:100%;object-fit:cover;display:block}
+.viseur-date{position:absolute;left:10%;right:10%;top:38%;height:24%;border:2px solid #ffd54f;border-radius:8px;box-shadow:0 0 0 999px rgba(0,0,0,.35)}
 .nouv h3{font-size:15px;margin:14px 0 4px}
 .nouv ul{padding-left:20px;margin:4px 0}
 .nouv li{margin:4px 0}
@@ -307,6 +314,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
     <section id="ongletPeremption" class="cache">
       <div class="carte">
         <h2>Dates de péremption</h2>
+        <button class="btn second plein" id="perReleve" style="margin-bottom:8px">📅 Relevé des dates (scanner les produits du rayon)</button>
         <div class="puces" id="perFiltres">
           <button class="puce actif" data-per="alerte" id="perFiltreAlerte">À surveiller</button>
           <button class="puce" data-per="rouge" id="perFiltreRouge">Urgent</button>
@@ -453,11 +461,20 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.5.5';
+const VERSION = 'v0.6.0';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.6.0', date: '30/10/2026', points: [
+    'Scan : la caméra prend le code-barres le plus au centre du cadre (et plus le produit voisin).',
+    'Nouveau produit : le code lu s\'affiche en grand, avec « Ce n\'est pas le bon code » pour le corriger ou rescanner avant la création.',
+    'Fiche produit → Infos produit → « Corriger le code-barres » : le produit passe sur le bon code avec son stock, ses prix, ses dates et son historique.',
+    'Dates de péremption : saisie rapide au clavier (050427 = 5 avril 2027, 0527 = fin mai 2027), la date s\'affiche en toutes lettres.',
+    'Essai : bouton 📷 à côté de la date pour la lire avec la caméra, et lecture automatique des codes GS1 des cartons qui contiennent la date.',
+    'Péremption → « Relevé des dates » : scanner les produits du rayon et encoder plusieurs dates par produit, à la suite.',
+    'Import de facture : un produit nouveau sans code-barres est signalé « recevra un numéro interne ».'
+  ] },
   { v: 'v0.5.5', date: '30/10/2026', points: [
     'La photo de la station Rolus apparaît sur l\'écran de connexion, en petit dans la barre du haut, et comme icône de l\'appli sur le téléphone.'
   ] },
@@ -931,7 +948,7 @@ async function demarrerCamera() {
     return;
   }
   try {
-    detecteur = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+    detecteur = await creerDetecteur();
     flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     const v = $('video');
     v.srcObject = flux;
@@ -951,15 +968,18 @@ async function analyserImage() {
   if (analyseEnCours || !detecteur) return;
   analyseEnCours = true;
   try {
-    const codes = await detecteur.detect($('video'));
-    if (codes.length) {
-      const v = codes[0].rawValue;
+    const video = $('video');
+    // Plusieurs codes visibles : on garde celui du centre du cadre ; codes 128 / QR sans produit ignorés
+    const lus = (await detecteur.detect(video)).map(c => ({ boundingBox: c.boundingBox, rawValue: c.rawValue, lu: interpreterLecture(c) })).filter(c => c.lu);
+    const c = codeCentral(lus, video);
+    if (c) {
+      const v = c.rawValue;
       // Le même code doit être lu deux fois de suite : évite les fausses lectures
       if (v === dernierLu) compteLu++; else { dernierLu = v; compteLu = 1; }
       if (compteLu >= 2) {
         arreterCamera();
         if (navigator.vibrate) navigator.vibrate(80);
-        traiterCode(v);
+        traiterCode(c.lu.brut, c.lu.date);
       }
     }
   } catch (e) { /* image pas encore prête */ }
@@ -987,7 +1007,9 @@ function afficherResultat(html, type) {
   $('sResultat').innerHTML = '<div class="resultat ' + type + '">' + html + '</div>';
 }
 
-function traiterCode(brut) {
+let dateAProposer = null;   // date lue sur un code GS1, à mettre dans l'entrée
+function traiterCode(brut, date) {
+  dateAProposer = date || null;
   const n = normaliserCode(brut);
   if (!n.ok) {
     afficherResultat('<b>' + esc(brut) + '</b><br>' + esc(n.raison) + '. Rescannez le produit.', 'ko');
@@ -1152,7 +1174,11 @@ async function ouvrirFiche(mode, p) {
   if (mode === 'nouveau') {
     $('fenetre').innerHTML =
       '<div class="tete"><h2>Nouveau produit</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
-      '<div class="aide">' + (ficheCourante.code ? 'Code : <b>' + esc(ficheCourante.code) + '</b>' : 'Un code interne sera attribué automatiquement') + '</div>' +
+      (ficheCourante.code
+        ? '<div class="code-lu">Code-barres : <b>' + esc(ficheCourante.code) + '</b><br><button class="lien" id="fPasBon" style="margin-top:4px">Ce n\'est pas le bon code ?</button>' +
+          '<div id="fCorrCode" class="cache"><div class="ligne" style="margin-top:6px"><input type="text" id="fCodeNouv" inputmode="numeric" autocomplete="off" placeholder="Taper ou scanner le bon code"><button class="btn" id="fCodeOk">OK</button></div>' +
+          '<button class="lien" id="fRescan">Rescanner avec la caméra</button></div></div>'
+        : '<div class="aide">Un code interne sera attribué automatiquement</div>') +
       '<div id="fInfoOFF" class="aide"></div>' +
       (ficheCourante.code ? blocRattacher() : '') +
       champsProduit(p) +
@@ -1163,6 +1189,20 @@ async function ouvrirFiche(mode, p) {
     $('fCat').onchange = () => { const c = CATEGORIES[$('fCat').value]; if (c) $('fTva').value = String(c.tva); };
     let attente = null;
     $('fDesc').oninput = () => { clearTimeout(attente); attente = setTimeout(majSemblables, 300); };
+    if ($('fPasBon')) {
+      $('fPasBon').onclick = () => { $('fCorrCode').classList.toggle('cache'); $('fCodeNouv').focus(); };
+      const corriger = () => {
+        const n = normaliserCode($('fCodeNouv').value);
+        if (!n.ok) { toast(n.raison, 'warn'); return; }
+        const ex = trouverCode(n.code);
+        if (ex) { toast('Ce code existe déjà : fiche ouverte.', 'warn'); retirerAttente(ficheCourante.code); ouvrirFiche('modif', catalogue.get(ex)); return; }
+        retirerAttente(ficheCourante.code);
+        ouvrirFiche('nouveau', { code: n.code, description: $('fDesc').value.trim() });
+      };
+      $('fCodeOk').onclick = corriger;
+      $('fCodeNouv').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); corriger(); } };
+      $('fRescan').onclick = () => { fermerFiche(); allerOnglet('scanner'); demarrerCamera(); };
+    }
     $('fSemblables').onclick = e => { const b = e.target.closest('[data-principal]'); if (b) choisirPrincipal(b.dataset.principal); };
     if (ficheCourante.code) {
       $('rqRecherche').oninput = renderRattacher;
@@ -1187,7 +1227,8 @@ async function ouvrirFiche(mode, p) {
   $('fenetre').innerHTML =
     '<div class="tete"><h2 id="fTitre">' + esc(p.description) + '</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
     '<div class="aide">Code : <b>' + esc(p.code) + '</b>' + ' · ' + esc(libCategorie(p.codeRapport || '0000')) + '</div>' +
-    (p.archive ? '<div class="alerte">Ce produit est <b>retiré du catalogue</b>' + (p.archivePar ? ' (par ' + esc(p.archivePar) + (p.archiveLe ? ' le ' + dateTexte(p.archiveLe) : '') + ')' : '') +
+    (p.remplacePar ? '<div class="alerte">Ce code a été <b>remplacé par ' + esc(p.remplacePar) + '</b>. <button class="btn petit" id="frNouvelle">Ouvrir la fiche</button></div>' :
+    p.archive ? '<div class="alerte">Ce produit est <b>retiré du catalogue</b>' + (p.archivePar ? ' (par ' + esc(p.archivePar) + (p.archiveLe ? ' le ' + dateTexte(p.archiveLe) : '') + ')' : '') +
       '. <button class="btn petit" id="frReactiver">Réactiver</button></div>' : '') +
     '<div class="resume" id="fResume"></div>' +
     blocEntree(p) +
@@ -1200,7 +1241,8 @@ async function ouvrirFiche(mode, p) {
       '<div class="meta">' + metaProduit(p) + '</div>' +
       '<div class="actions"><button class="btn" id="fEnregistrer">Enregistrer les infos</button></div>' +
       blocCodesSecondaires() +
-      (p.archive ? '' : '<button class="btn danger plein" id="frRetirer" style="margin-top:14px">Retirer du catalogue…</button>') +
+      (p.archive ? '' : '<button class="btn second plein" id="frCorrCode" style="margin-top:14px">Corriger le code-barres…</button>' +
+        '<button class="btn danger plein" id="frRetirer" style="margin-top:8px">Retirer du catalogue…</button>') +
     '</details>' +
     '<div class="actions"><button class="btn second" id="fAnnuler">Fermer</button></div>';
 
@@ -1222,6 +1264,13 @@ async function ouvrirFiche(mode, p) {
   brancherPeremptionFiche();
   $('soOk').onclick = sortirStock;
   if ($('frRetirer')) $('frRetirer').onclick = retirerDuCatalogue;
+  if ($('frCorrCode')) $('frCorrCode').onclick = ouvrirCorrectionCode;
+  if ($('frNouvelle')) $('frNouvelle').onclick = () => { const c = codeActuel(p.code); if (catalogue.has(c)) ouvrirFiche('modif', catalogue.get(c)); };
+  if (dateAProposer) {
+    if ($('eDate')) { remplirDate('e', dateAProposer); toast('Date lue sur le code : ' + texteDateLongue(dateAProposer) + ' (vérifiez)'); }
+    else toast('Date lue sur le code (' + texteDateLongue(dateAProposer) + '), mais les dates ne sont pas suivies pour ce produit.', 'warn');
+    dateAProposer = null;
+  }
   if ($('frReactiver')) $('frReactiver').onclick = () => reactiverProduit(p.code).then(() => { if (catalogue.has(p.code)) ouvrirFiche('modif', Object.assign({}, catalogue.get(p.code), { archive: false })); });
   brancherCodesFiche();
   majResumeFiche();
@@ -1233,6 +1282,9 @@ async function ouvrirFiche(mode, p) {
 function nettoyerFiche() {
   camRelancer = false;
   arreterCamComptage();
+  if (typeof arreterCamReleve === 'function') arreterCamReleve();
+  releveCode = null;
+  fermerLectureDate();
   if (desabonnerHistorique) { desabonnerHistorique(); desabonnerHistorique = null; }
   historiqueCourant = null;
 }
@@ -1446,6 +1498,7 @@ function ajouterEntree() {
   const fourn = $('eFourn').value.trim();
   const fact = $('eFact').value.trim();
   const datePer = $('eDate') ? lireDate('e') : null;
+  if (datePer === false) return;
   if (datePer && joursRestants(datePer.peremption) < 0 && !confirm('La date de péremption ' + dateLot(datePer) + ' est déjà dépassée. Continuer ?')) return;
 
   // Faute de frappe probable sur le prix ?
@@ -1488,7 +1541,7 @@ function ajouterEntree() {
   toast('Entrée ajoutée : +' + fmtQte(c.qte) + ' ' + (p.description || ''));
   $('eQte').value = '';
   $('eNbc').value = '';
-  if ($('eDate')) $('eDate').value = '';
+  if ($('eDate')) { $('eDate').value = ''; majTexteDate('e'); }
   majCalcul();
 }
 
@@ -1529,7 +1582,9 @@ function corrigerStock() {
 //  HISTORIQUE D'UN PRODUIT
 // ============================================================
 function ecouterHistorique(code) {
-  desabonnerHistorique = db.collection('mouvements').where('code', '==', code).onSnapshot(snap => {
+  const codes = [code].concat((catalogue.get(code) || {}).ancienCodes || []).slice(0, 10);
+  const q = codes.length > 1 ? db.collection('mouvements').where('code', 'in', codes) : db.collection('mouvements').where('code', '==', code);
+  desabonnerHistorique = q.onSnapshot(snap => {
     historiqueCourant = [];
     snap.forEach(d => historiqueCourant.push(Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' }))));
     historiqueCourant.sort((a, b) => ms(b.le) - ms(a.le));
@@ -1593,7 +1648,7 @@ async function annulerMouvement(id) {
     maj.dernierPrixHT = precedente ? precedente.prixUnitaireHT : null;
     maj.dernierFournisseur = precedente ? (precedente.fournisseur || null) : null;
   }
-  lot.update(db.collection('produits').doc(m.code), maj);
+  lot.update(db.collection('produits').doc(codeActuel(m.code)), maj);
   // Lot de péremption lié : annulé avec l'entrée, ou remis en place si on annule un retrait
   if (lotExiste && m.type === 'entree') lot.update(db.collection('lots').doc(m.lotPeremption), { statut: 'annule', closPar: utilisateur, closLe: FV.serverTimestamp() });
   if (lotExiste && m.type === 'perte') lot.update(db.collection('lots').doc(m.lotPeremption), { quantite: FV.increment(-m.quantite), statut: 'actif' });
@@ -1641,27 +1696,27 @@ function dateLot(l) {
   return l.precision === 'mois' ? 'fin ' + m + '/' + a : j + '/' + m + '/' + a;
 }
 
-// Champs de saisie d'une date (préfixe « e » pour l'entrée, « a » pour l'ajout manuel)
+// Champs de saisie d'une date (préfixe « e » pour l'entrée, « a » pour l'ajout manuel, « r » pour le relevé)
 function champsDate(px, avecQte) {
   return '<div class="deux">' +
-    '<div><label for="' + px + 'Date">Péremption</label><input type="date" id="' + px + 'Date"></div>' +
+    '<div><label for="' + px + 'Date">Péremption</label><div class="ligne"><input type="text" id="' + px + 'Date" inputmode="numeric" autocomplete="off" placeholder="ex. 050427">' +
+      '<button type="button" class="btn second" id="' + px + 'DateCam" title="Lire la date avec la caméra (essai)" style="padding:0 10px">📷</button></div></div>' +
     (avecQte ? '<div><label for="' + px + 'Qte">Quantité</label><input type="text" id="' + px + 'Qte" inputmode="decimal" autocomplete="off"></div>' : '<div></div>') +
     '</div>' +
-    '<label class="coche" style="margin-top:6px"><input type="checkbox" id="' + px + 'Mois"> Mois et année seulement (« à consommer de préférence avant fin… »)</label>';
+    '<div class="aide" id="' + px + 'DateTxt">Jour-mois-année (050427) ou mois-année (0527)</div>';
 }
 function brancherDate(px) {
-  const cb = $(px + 'Mois');
-  if (cb) cb.onchange = () => { $(px + 'Date').value = ''; $(px + 'Date').type = cb.checked ? 'month' : 'date'; };
+  const champ = $(px + 'Date');
+  if (!champ) return;
+  champ.oninput = () => majTexteDate(px);
+  $(px + 'DateCam').onclick = () => ouvrirLectureDate(d => { remplirDate(px, d); if ($(px + 'Qte')) $(px + 'Qte').focus(); });
 }
-// Renvoie { peremption: 'AAAA-MM-JJ', precision } ou null si le champ est vide
+// Renvoie { peremption: 'AAAA-MM-JJ', precision }, null si le champ est vide, false si la date est illisible
 function lireDate(px) {
-  const v = $(px + 'Date') ? $(px + 'Date').value : '';
-  if (!v) return null;
-  if ($(px + 'Mois').checked) {
-    const [a, m] = v.split('-').map(Number);
-    return { peremption: jourLocal(new Date(a, m, 0)), precision: 'mois' };   // dernier jour du mois
-  }
-  return { peremption: v, precision: 'jour' };
+  const d = interpreterDate($(px + 'Date') ? $(px + 'Date').value : '');
+  if (!d) return null;
+  if (d.erreur) { toast(d.erreur, 'warn'); $(px + 'Date').focus(); return false; }
+  return d;
 }
 function nouveauLot(code, p, d, quantite, source) {
   const FV = firebase.firestore.FieldValue;
@@ -1681,6 +1736,7 @@ function ecouterPeremption() {
     snap.forEach(d => lotsActifs.push(Object.assign({ id: d.id }, d.data({ serverTimestamps: 'estimate' }))));
     lotsActifs.sort((a, b) => a.peremption.localeCompare(b.peremption));
     majAlertesPeremption();
+    if (releveCode) renderProduitReleve();
   }, err => console.warn('Lots', err.code));
 
   if (desabonnerSeuils) desabonnerSeuils();
@@ -1814,13 +1870,14 @@ function brancherPeremptionFiche() {
     const code = ficheCourante.code;
     const p = catalogue.get(code) || {};
     const d = lireDate('a');
+    if (d === false) return;
     const q = lireNombre($('aQte').value);
     if (!d) { toast('Indiquez la date de péremption.', 'warn'); return; }
     if (!q || q <= 0) { toast('Indiquez la quantité concernée.', 'warn'); return; }
     if (joursRestants(d.peremption) < 0 && !confirm('Cette date est déjà dépassée. Ajouter quand même ?')) return;
     db.collection('lots').add(nouveauLot(code, p, d, q, 'manuel'))
       .catch(e => toast('Ajout refusé : ' + (e.code || e.message), 'ko'));
-    $('aDate').value = ''; $('aQte').value = '';
+    $('aDate').value = ''; $('aQte').value = ''; majTexteDate('a');
     toast('Date ajoutée : ' + fmtQte(q) + ' u. au ' + dateLot(d));
   };
   renderLotsFiche();
@@ -2049,6 +2106,7 @@ function afficherApercuMv() {
       p.lignes.map((x, i) => '<tr><td>' + (x.nouveau
           ? '<span class="badge orange">nouveau</span> ' + esc(x.description) +
             '<br><input type="text" class="cbNouveau" data-i="' + i + '" inputmode="numeric" placeholder="Code-barres (facultatif)" value="' + esc(x.code || '') + '" style="margin-top:4px;padding:6px 8px">' +
+            '<br><span class="aide cbInfo" data-i="' + i + '">' + (x.code ? 'Code ' + esc(x.code) : '⚠️ Sans code-barres : recevra un numéro interne (20…)') + '</span>' +
             (x.raison ? '<br><span class="aide">' + esc(x.raison) + '</span>' : '')
           : esc(x.description) + '<br><span class="aide">' + esc(x.code) + (x.ref ? ' · réf. ' + esc(x.ref) : '') + '</span>' +
             (catalogue.get(x.code) && catalogue.get(x.code).archive ? ' <span class="badge orange">retiré → réactivé</span>' : '')) +
@@ -2072,6 +2130,13 @@ function afficherApercuMv() {
   if (sessionComptage) h += '<div class="alerte">⚠️ Un inventaire rapide est en cours (' + esc(libelleSession(sessionComptage)) + ') : clôturez-le avant d\'importer.</div>';
   h += '<div class="' + (p.controleOk ? 'resultat ok' : 'alerte') + '">' + (p.controleOk ? '✅ Tout concorde : vous pouvez confirmer.' : '⚠️ Vérifiez les écarts ci-dessus avant de confirmer.') + ' Rien n\'est encore enregistré.</div>';
   $('mvApercu').innerHTML = h;
+  document.querySelectorAll('.cbNouveau').forEach(inp => inp.oninput = () => {
+    const info = document.querySelector('.cbInfo[data-i="' + inp.dataset.i + '"]');
+    const v = inp.value.trim(), n = normaliserCode(v);
+    if (!v) info.textContent = '⚠️ Sans code-barres : recevra un numéro interne (20…)';
+    else if (!n.ok) info.textContent = '⚠️ ' + n.raison;
+    else { const ex = trouverCode(n.code); info.textContent = ex ? '→ existe déjà : ' + catalogue.get(ex).description + ' (pas de nouveau produit)' : 'Code ' + n.code; }
+  });
   $('mvValidation').classList.remove('cache');
 }
 
@@ -2362,7 +2427,7 @@ async function executerSuppression(imports, mv, corriger) {
       const lot = db.batch();
       actifs.slice(i, i + 150).forEach(m => {
         lot.update(db.collection('mouvements').doc(m.id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
-        if (corriger) lot.update(db.collection('produits').doc(m.code), { stock: FV.increment(-m.quantite) });
+        if (corriger) lot.update(db.collection('produits').doc(codeActuel(m.code)), { stock: FV.increment(-m.quantite) });
       });
       await lot.commit();
     }
@@ -2507,7 +2572,7 @@ async function annulerImport2(genre, id) {
       const lot = db.batch();
       mv.slice(i, i + 150).forEach(m => {
         lot.update(db.collection('mouvements').doc(m.id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
-        lot.update(db.collection('produits').doc(m.code), { stock: FV.increment(-m.quantite) });
+        lot.update(db.collection('produits').doc(codeActuel(m.code)), { stock: FV.increment(-m.quantite) });
         if (m.lotPeremption) lot.update(db.collection('lots').doc(m.lotPeremption), { statut: 'annule', closPar: utilisateur, closLe: FV.serverTimestamp() });
       });
       await lot.commit();
@@ -2556,7 +2621,11 @@ function arreterSortiesEtAlias() {
 
 // Code scanné → code du produit : code principal, code secondaire ou numéro interne sans ses zéros
 function trouverCode(code) {
-  if (catalogue.has(code)) return code;
+  if (catalogue.has(code)) {
+    const p = catalogue.get(code);
+    if (p.remplacePar && aliasMap.get(code) === p.remplacePar) return codeActuel(code);
+    return code;
+  }
   const a = aliasMap.get(code);
   if (a && catalogue.has(a)) return a;
   return cleExistante(code, catalogue);
@@ -2628,7 +2697,7 @@ function reactiverProduit(code) {
 function renderArchives() {
   const ul = $('arListe');
   if (!ul) return;
-  const l = [...catalogue.values()].filter(p => p.archive).sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr'));
+  const l = [...catalogue.values()].filter(p => p.archive && !p.remplacePar).sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr'));
   ul.innerHTML = l.length ? l.map(p => '<li><div class="desc"><b>' + esc(p.description) + '</b> <span class="code">' + esc(p.code) + '</span><br><span class="aide">' +
     esc(libCategorie(p.codeRapport || '0000')) + (p.archiveLe ? ' · retiré le ' + dateTexte(p.archiveLe) + ' par ' + esc(p.archivePar) : '') + '</span></div>' +
     '<button class="btn second petit" data-reactiver="' + esc(p.code) + '">Réactiver</button></li>').join('')
@@ -2844,7 +2913,7 @@ function ouvrirEcranComptage() {
 async function demarrerCamComptage() {
   if (!('BarcodeDetector' in window)) { toast('Caméra indisponible sur cet appareil : utilisez la saisie ou une douchette.', 'warn'); return; }
   try {
-    const det = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+    const det = await creerDetecteur();
     const flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     const v = $('icVideo');
     if (!v) { flux.getTracks().forEach(t => t.stop()); return; }
@@ -2857,14 +2926,15 @@ async function demarrerCamComptage() {
       if (!camC || camC.occupe) return;
       camC.occupe = true;
       try {
-        const r = await camC.det.detect(v);
-        if (r.length) {
-          const x = r[0].rawValue;
+        const lus = (await camC.det.detect(v)).map(c => ({ boundingBox: c.boundingBox, rawValue: c.rawValue, lu: interpreterLecture(c) })).filter(c => c.lu);
+        const ch = codeCentral(lus, v);
+        if (ch) {
+          const x = ch.rawValue;
           if (x === camC.dernier) camC.n++; else { camC.dernier = x; camC.n = 1; }
           if (camC.n >= 2) {
             arreterCamComptage();
             if (navigator.vibrate) navigator.vibrate(80);
-            scanComptage(x);
+            scanComptage(ch.lu.brut);
           }
         }
       } catch (e) { /* image pas prête */ } finally { if (camC) camC.occupe = false; }
@@ -3063,9 +3133,10 @@ async function recalculerPrix(codes, exclus) {
   const ex = new Set(exclus || []);
   const lot = db.batch();
   let n = 0;
-  for (const code of new Set(codes)) {
+  for (const code of new Set(codes.map(codeActuel))) {
     if (!catalogue.has(code)) continue;
-    const snap = await db.collection('mouvements').where('code', '==', code).get();
+    const tous = [code].concat(catalogue.get(code).ancienCodes || []).slice(0, 10);
+    const snap = await db.collection('mouvements').where('code', 'in', tous).get();
     const achats = [];
     snap.forEach(d => { const m = d.data(); if (m.type === 'entree' && !m.annulee && !ex.has(d.id)) achats.push(m); });
     achats.sort((a, b) => ms(b.le) - ms(a.le));
@@ -3326,6 +3397,519 @@ function lignesAffichees(inclureZero) {
   return inventaireArrete.lignes.filter(l => inclureZero || l.q !== 0).map(l => ({ p: { code: l.code, description: l.description, codeRapport: l.codeRapport, tvaPct: l.tvaPct, stock: l.q, dernierFournisseur: '' }, q: l.q, pu: l.pu, valeur: l.valeur }));
 }
 // ============================================================
+//  LECTURE DES CODES : code le plus au centre, codes GS1 (avec date de péremption)
+// ============================================================
+const FORMATS_PRODUIT = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
+const FORMATS_GS1 = ['code_128', 'data_matrix', 'qr_code'];
+let formatsDispo = null;
+async function creerDetecteur() {
+  if (!('BarcodeDetector' in window)) return null;
+  if (!formatsDispo) {
+    try { formatsDispo = await BarcodeDetector.getSupportedFormats(); } catch (e) { formatsDispo = FORMATS_PRODUIT; }
+  }
+  const f = FORMATS_PRODUIT.concat(FORMATS_GS1).filter(x => formatsDispo.includes(x));
+  return new BarcodeDetector({ formats: f.length ? f : FORMATS_PRODUIT });
+}
+// Parmi les codes visibles, celui dont le centre est le plus proche du centre du cadre de visée
+function codeCentral(codes, video) {
+  if (codes.length <= 1) return codes[0] || null;
+  const cx = (video.videoWidth || 1) / 2, cy = (video.videoHeight || 1) / 2;
+  const dist = c => {
+    const b = c.boundingBox || { x: 0, y: 0, width: 0, height: 0 };
+    return Math.hypot(b.x + b.width / 2 - cx, b.y + b.height / 2 - cy);
+  };
+  return codes.slice().sort((a, b) => dist(a) - dist(b))[0];
+}
+// Lecture brute → { brut: code produit à traiter, date: {peremption, precision} | null } ou null (code à ignorer)
+function interpreterLecture(c) {
+  const raw = String(c.rawValue || '');
+  if (!c.format || FORMATS_PRODUIT.includes(c.format)) return { brut: raw, date: null };
+  const g = lireGS1(raw);
+  return g && g.gtin ? { brut: g.gtin, date: g.date } : null;   // un code 128 / QR sans GTIN n'est pas un produit
+}
+
+// ---------- Codes GS1 (cartons, DataMatrix, QR « GS1 Digital Link ») ----------
+const GS1_FIXES = { '00': 18, '01': 14, '02': 14, '11': 6, '12': 6, '13': 6, '15': 6, '16': 6, '17': 6, '20': 2 };
+function dateGS1(yymmdd) {
+  if (!/^\d{6}$/.test(yymmdd)) return null;
+  const a = 2000 + Number(yymmdd.slice(0, 2)), m = Number(yymmdd.slice(2, 4)), j = Number(yymmdd.slice(4, 6));
+  if (m < 1 || m > 12) return null;
+  if (j === 0) return { peremption: jourLocal(new Date(a, m, 0)), precision: 'mois' };   // « 00 » = fin du mois
+  const d = new Date(a, m - 1, j);
+  if (d.getMonth() !== m - 1) return null;
+  return { peremption: jourLocal(d), precision: 'jour' };
+}
+function lireGS1(raw) {
+  let s = String(raw || '').trim();
+  const ai = {};
+  // GS1 Digital Link : https://…/01/05410228214946/17/270405 ou ?17=270405
+  const dl = s.match(/\/01\/(\d{14})/);
+  if (dl) {
+    ai['01'] = dl[1];
+    const e = s.match(/[\/?&](17|15)[\/=](\d{6})/g) || [];
+    e.forEach(x => { const m = x.match(/(17|15)[\/=](\d{6})/); if (m) ai[m[1]] = m[2]; });
+  } else if (/\(\d{2,4}\)/.test(s)) {
+    // Forme lisible : (01)05410228214946(17)270405(10)L123
+    const re = /\((\d{2,4})\)([^(]*)/g;
+    let m;
+    while ((m = re.exec(s))) ai[m[1]] = m[2].trim();
+  } else {
+    s = s.replace(/^\][A-Za-z]\d/, '');          // préfixe de symbologie (]C1, ]d2, ]Q3…)
+    let i = 0, garde = 0;
+    while (i < s.length && garde++ < 20) {
+      if (s[i] === '\u001d') { i++; continue; }
+      const k2 = s.slice(i, i + 2);
+      if (GS1_FIXES[k2]) {
+        ai[k2] = s.slice(i + 2, i + 2 + GS1_FIXES[k2]);
+        i += 2 + GS1_FIXES[k2];
+        continue;
+      }
+      // Données de longueur variable (lot, série…) : jusqu'au séparateur GS ou la fin
+      const lg = /^(10|21|22|30|37|9\d)$/.test(k2) ? 2 : (/^(24[01]|250|400|41\d)$/.test(s.slice(i, i + 3)) ? 3 : 0);
+      if (!lg) break;
+      const fin = s.indexOf('\u001d', i);
+      ai[s.slice(i, i + lg)] = s.slice(i + lg, fin < 0 ? s.length : fin);
+      i = fin < 0 ? s.length : fin + 1;
+    }
+  }
+  const gtin = ai['01'] || ai['02'];
+  if (!gtin || !/^\d{14}$/.test(gtin)) return null;
+  return { gtin, date: dateGS1(ai['17'] || '') || dateGS1(ai['15'] || '') };
+}
+
+// ============================================================
+//  SAISIE RAPIDE D'UNE DATE : 050427, 05-04-27, 0527, 05/27…
+// ============================================================
+const MOIS_NOMS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+function construireDate(j, m, a) {
+  if (a < 100) a += 2000;
+  if (a < 2000 || a > 2099 || m < 1 || m > 12) return null;
+  if (j === null) return { peremption: jourLocal(new Date(a, m, 0)), precision: 'mois' };
+  const d = new Date(a, m - 1, j);
+  if (j < 1 || d.getMonth() !== m - 1) return null;
+  return { peremption: jourLocal(d), precision: 'jour' };
+}
+// Renvoie { peremption, precision }, null si vide, ou { erreur }
+function interpreterDate(s) {
+  const t = String(s || '').trim();
+  if (!t) return null;
+  const p = t.split(/[^0-9]+/).filter(Boolean);
+  let r = null;
+  if (p.length === 1) {
+    const d = p[0], N = x => Number(x);
+    if (d.length === 8) r = construireDate(N(d.slice(0, 2)), N(d.slice(2, 4)), N(d.slice(4)));
+    else if (d.length === 6) r = construireDate(N(d.slice(0, 2)), N(d.slice(2, 4)), N(d.slice(4))) || construireDate(null, N(d.slice(0, 2)), N(d.slice(2)));
+    else if (d.length === 5) r = construireDate(N(d.slice(0, 1)), N(d.slice(1, 3)), N(d.slice(3)));
+    else if (d.length === 4) r = construireDate(null, N(d.slice(0, 2)), N(d.slice(2)));
+    else if (d.length === 3) r = construireDate(null, N(d.slice(0, 1)), N(d.slice(1)));
+  } else if (p.length === 3) {
+    r = p[0].length === 4 ? construireDate(Number(p[2]), Number(p[1]), Number(p[0]))     // 2027-04-05
+      : construireDate(Number(p[0]), Number(p[1]), Number(p[2]));
+  } else if (p.length === 2 && p[0].length === 4) {
+    r = construireDate(null, Number(p[1]), Number(p[0]));                                  // 2027-05
+  } else if (p.length === 2 && (p[1].length === 2 || p[1].length === 4)) {
+    r = construireDate(null, Number(p[0]), Number(p[1]));
+  }
+  return r || { erreur: 'Date non reconnue : tapez par ex. 050427 (5 avril 2027) ou 0527 (fin mai 2027)' };
+}
+function texteDateLongue(d) {
+  const [a, m, j] = d.peremption.split('-').map(Number);
+  return d.precision === 'mois' ? 'fin ' + MOIS_NOMS[m - 1] + ' ' + a : j + (j === 1 ? 'er' : '') + ' ' + MOIS_NOMS[m - 1] + ' ' + a;
+}
+function saisieDate(d) {
+  const [a, m, j] = d.peremption.split('-');
+  return d.precision === 'mois' ? m + '/' + a : j + '/' + m + '/' + a;
+}
+function majTexteDate(px) {
+  const z = $(px + 'DateTxt');
+  if (!z) return;
+  const d = interpreterDate($(px + 'Date').value);
+  if (!d) { z.className = 'aide'; z.textContent = 'Jour-mois-année (050427) ou mois-année (0527)'; return; }
+  if (d.erreur) { z.className = 'aide sansprix'; z.textContent = d.erreur; return; }
+  const jr = joursRestants(d.peremption);
+  z.className = 'aide';
+  z.innerHTML = '→ <b>' + texteDateLongue(d) + '</b>' + (jr < 0 ? ' <span class="sansprix">⚠️ déjà dépassée</span>' : (jr > 365 * 5 ? ' <span class="sansprix">⚠️ très lointaine : vérifiez</span>' : ''));
+}
+function remplirDate(px, d) {
+  if (!$(px + 'Date') || !d) return;
+  $(px + 'Date').value = saisieDate(d);
+  majTexteDate(px);
+}
+
+// ============================================================
+//  LECTURE DE LA DATE PAR LA CAMÉRA (essai) : texte (Tesseract) + codes GS1
+// ============================================================
+const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+let ocrWorker = null, ocrChargement = null;
+let lecDate = null;   // { flux, det, boucleCode, boucleTexte, votes, retour }
+
+function chargerOCR() {
+  if (ocrWorker) return Promise.resolve(ocrWorker);
+  if (ocrChargement) return ocrChargement;
+  ocrChargement = new Promise((ok, ko) => {
+    const go = async () => {
+      try {
+        const w = await Tesseract.createWorker('eng', 1);
+        await w.setParameters({ tessedit_char_whitelist: '0123456789/-.: ', tessedit_pageseg_mode: '6' });
+        ocrWorker = w;
+        ok(w);
+      } catch (e) { ocrChargement = null; ko(e); }
+    };
+    if (window.Tesseract) { go(); return; }
+    const sc = document.createElement('script');
+    sc.src = TESSERACT_URL;
+    sc.onload = go;
+    sc.onerror = () => { ocrChargement = null; ko(new Error('module de lecture non téléchargé (connexion ?)')); };
+    document.head.appendChild(sc);
+  });
+  return ocrChargement;
+}
+// Dates plausibles trouvées dans un texte lu (aujourd'hui − 1 an … + 6 ans)
+function extraireDates(texte) {
+  const t = ' ' + String(texte || '').replace(/[oO]/g, '0') + ' ';
+  const res = [], vus = new Set();
+  const ajouter = d => {
+    if (!d || d.erreur || vus.has(d.peremption + d.precision)) return;
+    const jr = joursRestants(d.peremption);
+    if (jr < -365 || jr > 365 * 6) return;
+    vus.add(d.peremption + d.precision); res.push(d);
+  };
+  let m;
+  const r3 = /(?<!\d)(\d{1,2})\s*[\/.\-: ]\s*(\d{1,2})\s*[\/.\-: ]\s*(\d{4}|\d{2})(?!\d)/g;
+  const pris = [];
+  while ((m = r3.exec(t))) {
+    const d = construireDate(Number(m[1]), Number(m[2]), Number(m[3]));
+    if (d) { ajouter(d); pris.push([m.index, m.index + m[0].length]); }
+  }
+  const libre = i => !pris.some(([a, b]) => i >= a && i < b);
+  const r2 = /(?<!\d)(\d{1,2})\s*[\/.\-]\s*(\d{4}|\d{2})(?!\d)/g;
+  while ((m = r2.exec(t))) if (libre(m.index)) ajouter(construireDate(null, Number(m[1]), Number(m[2])));
+  const r6 = /(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)/g;
+  while ((m = r6.exec(t))) if (libre(m.index)) ajouter(construireDate(Number(m[1]), Number(m[2]), Number(m[3])));
+  return res;
+}
+
+async function ouvrirLectureDate(retour) {
+  if (!navigator.mediaDevices) { toast('Caméra indisponible sur cet appareil.', 'warn'); return; }
+  fermerLectureDate();
+  const f = document.createElement('div');
+  f.id = 'fondDate';
+  f.innerHTML = '<div class="fenetre-date">' +
+    '<div class="tete"><h2>Lire la date</h2><button class="fermer" id="ldX" aria-label="Fermer">✕</button></div>' +
+    '<div class="zone-date"><video id="ldVideo" playsinline muted></video><div class="viseur-date"></div></div>' +
+    '<p class="aide" id="ldEtat">Mettez la date dans le cadre, bien nette et de face.</p>' +
+    '<div id="ldLu" class="aide"></div>' +
+    '<div id="ldChoix"></div>' +
+    '<p class="aide">Essai : les dates imprimées en petits points (canettes, bouteilles) sont souvent mal lues. Rien n\'est enregistré sans votre choix.</p>' +
+    '<button class="btn second plein" id="ldTaper">Taper la date moi-même</button></div>';
+  document.body.appendChild(f);
+  $('ldX').onclick = fermerLectureDate;
+  $('ldTaper').onclick = fermerLectureDate;
+  $('ldChoix').onclick = e => {
+    const b = e.target.closest('[data-d]');
+    if (!b) return;
+    const [peremption, precision] = b.dataset.d.split('|');
+    const r = lecDate && lecDate.retour;
+    fermerLectureDate();
+    if (r) r({ peremption, precision });
+  };
+  lecDate = { votes: new Map(), retour };
+  try {
+    const flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } }, audio: false });
+    if (!lecDate) { flux.getTracks().forEach(t => t.stop()); return; }
+    lecDate.flux = flux;
+    const v = $('ldVideo');
+    v.srcObject = flux;
+    await v.play();
+  } catch (e) {
+    fermerLectureDate();
+    toast('Caméra inaccessible : autorisez-la dans le navigateur.', 'ko');
+    return;
+  }
+  // Codes GS1 avec date (cartons) : lecture immédiate et sûre
+  creerDetecteur().then(det => {
+    if (!det || !lecDate) return;
+    lecDate.det = det;
+    lecDate.boucleCode = setInterval(async () => {
+      if (!lecDate || lecDate.occupeCode) return;
+      lecDate.occupeCode = true;
+      try {
+        const r = await det.detect($('ldVideo'));
+        for (const c of r) {
+          const g = FORMATS_GS1.includes(c.format) ? lireGS1(c.rawValue) : null;
+          if (g && g.date) {
+            const ret = lecDate.retour;
+            fermerLectureDate();
+            if (navigator.vibrate) navigator.vibrate(80);
+            toast('Date lue sur le code GS1 : ' + texteDateLongue(g.date));
+            if (ret) ret(g.date);
+            return;
+          }
+        }
+      } catch (e) { /* image pas prête */ } finally { if (lecDate) lecDate.occupeCode = false; }
+    }, 300);
+  });
+  // Lecture du texte imprimé
+  $('ldEtat').textContent = 'Préparation de la lecture (premier usage : téléchargement d\'environ 4 Mo)…';
+  let w;
+  try { w = await chargerOCR(); } catch (e) {
+    if ($('ldEtat')) $('ldEtat').textContent = 'Lecture du texte indisponible : ' + e.message + '. Les codes GS1 restent lus.';
+    return;
+  }
+  if (!lecDate) return;
+  $('ldEtat').textContent = 'Lecture en cours… visez la date dans le cadre.';
+  const canvas = document.createElement('canvas');
+  const lire = async () => {
+    if (!lecDate || lecDate.occupeTexte) return;
+    const v = $('ldVideo');
+    if (!v || !v.videoWidth) return;
+    lecDate.occupeTexte = true;
+    try {
+      // Bande centrale de l'image (le cadre), agrandie, en niveaux de gris contrastés
+      const sx = v.videoWidth * 0.1, sw = v.videoWidth * 0.8, sy = v.videoHeight * 0.38, sh = v.videoHeight * 0.24;
+      const lw = 1000, lh = Math.round(lw * sh / sw);
+      canvas.width = lw; canvas.height = lh;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(v, sx, sy, sw, sh, 0, 0, lw, lh);
+      const img = ctx.getImageData(0, 0, lw, lh), px = img.data;
+      let min = 255, max = 0;
+      for (let i = 0; i < px.length; i += 4) { const g = (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11); px[i] = g; if (g < min) min = g; if (g > max) max = g; }
+      const k = 255 / Math.max(1, max - min);
+      for (let i = 0; i < px.length; i += 4) { const g = (px[i] - min) * k; px[i] = px[i + 1] = px[i + 2] = g; }
+      ctx.putImageData(img, 0, 0);
+      const r = await w.recognize(canvas);
+      if (!lecDate) return;
+      const texte = (r.data.text || '').replace(/\s+/g, ' ').trim();
+      $('ldLu').textContent = texte ? 'Lu : « ' + texte.slice(0, 60) + ' »' : '';
+      extraireDates(texte).forEach(d => {
+        const cle = d.peremption + '|' + d.precision;
+        lecDate.votes.set(cle, (lecDate.votes.get(cle) || 0) + 1);
+      });
+      const l = [...lecDate.votes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+      $('ldChoix').innerHTML = l.length ? '<p style="margin:8px 0 4px">Touchez la bonne date :</p>' + l.map(([cle, n]) => {
+        const [peremption, precision] = cle.split('|');
+        return '<button class="btn plein" style="margin-top:6px" data-d="' + esc(cle) + '">' + esc(texteDateLongue({ peremption, precision })) + (n > 1 ? ' <span style="opacity:.7">(lu ' + n + ' fois)</span>' : '') + '</button>';
+      }).join('') : '';
+    } catch (e) { console.warn('OCR', e); } finally { if (lecDate) lecDate.occupeTexte = false; }
+  };
+  lecDate.boucleTexte = setInterval(lire, 1200);
+  lire();
+}
+function fermerLectureDate() {
+  if (lecDate) {
+    clearInterval(lecDate.boucleCode); clearInterval(lecDate.boucleTexte);
+    if (lecDate.flux) lecDate.flux.getTracks().forEach(t => t.stop());
+  }
+  lecDate = null;
+  const f = $('fondDate');
+  if (f) f.remove();
+}
+
+// ============================================================
+//  RELEVÉ DES DATES : plusieurs dates par produit, produit après produit
+// ============================================================
+let releveCode = null, camR = null;
+
+function ouvrirReleveDates() {
+  arreterCamera();
+  nettoyerFiche();
+  ficheCourante = null;
+  releveCode = null;
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>Relevé des dates</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<p class="aide" style="margin-top:0">Scannez un produit, puis encodez chaque date avec sa quantité. Le stock ne change pas.</p>' +
+    '<button class="btn plein" id="rvCam">📷 Scanner le produit</button>' +
+    '<div id="rvZone" class="cache" style="position:relative;background:#000;border-radius:10px;overflow:hidden;margin-top:10px;aspect-ratio:4/3">' +
+      '<video id="rvVideo" playsinline muted style="width:100%;height:100%;object-fit:cover;display:block"></video><div style="position:absolute;left:10%;right:10%;top:38%;height:24%;border:2px solid rgba(255,255,255,.85);border-radius:8px"></div></div>' +
+    '<div class="ligne" style="margin-top:8px"><input type="text" id="rvSaisie" inputmode="numeric" autocomplete="off" placeholder="Code-barres / douchette puis Entrée"><button class="btn" id="rvOk">OK</button></div>' +
+    '<div id="rvProduit"></div>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  $('rvCam').onclick = () => { if (camR) arreterCamReleve(); else demarrerCamReleve(); };
+  const valider = () => { const v = $('rvSaisie').value; $('rvSaisie').value = ''; if (v.trim()) choisirProduitReleve(v, null); };
+  $('rvOk').onclick = valider;
+  $('rvSaisie').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); valider(); } };
+  $('rvSaisie').focus();
+}
+async function demarrerCamReleve() {
+  const det = await creerDetecteur();
+  if (!det) { toast('Caméra indisponible sur cet appareil : utilisez la saisie ou une douchette.', 'warn'); return; }
+  try {
+    const flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    const v = $('rvVideo');
+    if (!v) { flux.getTracks().forEach(t => t.stop()); return; }
+    v.srcObject = flux; await v.play();
+    $('rvZone').classList.remove('cache');
+    $('rvCam').textContent = '✕ Fermer la caméra';
+    camR = { flux, dernier: null, n: 0, occupe: false };
+    camR.boucle = setInterval(async () => {
+      if (!camR || camR.occupe) return;
+      camR.occupe = true;
+      try {
+        const r = (await det.detect(v)).map(c => Object.assign({ lu: interpreterLecture(c) }, { boundingBox: c.boundingBox, rawValue: c.rawValue })).filter(c => c.lu);
+        const c = codeCentral(r, v);
+        if (c) {
+          if (c.rawValue === camR.dernier) camR.n++; else { camR.dernier = c.rawValue; camR.n = 1; }
+          if (camR.n >= 2) { arreterCamReleve(); if (navigator.vibrate) navigator.vibrate(80); choisirProduitReleve(c.lu.brut, c.lu.date); }
+        }
+      } catch (e) { /* image pas prête */ } finally { if (camR) camR.occupe = false; }
+    }, 200);
+  } catch (e) { arreterCamReleve(); toast('Caméra inaccessible : autorisez-la dans le navigateur.', 'ko'); }
+}
+function arreterCamReleve() {
+  if (camR) { clearInterval(camR.boucle); camR.flux.getTracks().forEach(t => t.stop()); camR = null; }
+  if ($('rvZone')) { $('rvZone').classList.add('cache'); $('rvCam').textContent = '📷 Scanner le produit'; }
+}
+function choisirProduitReleve(brut, date) {
+  const n = normaliserCode(brut);
+  if (!n.ok) { $('rvProduit').innerHTML = '<div class="resultat ko"><b>' + esc(brut) + '</b> : ' + esc(n.raison) + '. Rescannez.</div>'; return; }
+  const code = trouverCode(n.code);
+  if (!code) { $('rvProduit').innerHTML = '<div class="resultat ko">Code <b>' + esc(n.code) + '</b> inconnu : créez d\'abord le produit (onglet Scanner).</div>'; return; }
+  releveCode = code;
+  renderProduitReleve();
+  if (date) { remplirDate('r', date); toast('Date lue sur le code : ' + texteDateLongue(date)); }
+}
+function renderProduitReleve() {
+  const z = $('rvProduit');
+  if (!z || !releveCode) return;
+  const p = catalogue.get(releveCode);
+  if (!p) return;
+  const lots = lotsActifs.filter(l => l.code === releveCode).sort((a, b) => a.peremption.localeCompare(b.peremption));
+  const avecDate = arrondi(lots.reduce((s, l) => s + (l.quantite || 0), 0), 3);
+  const sansDate = Math.max(0, arrondi((p.stock || 0) - avecDate, 3));
+  const garde = $('rDate') ? { d: $('rDate').value, q: $('rQte').value } : null;
+  z.innerHTML = '<div class="apercu" style="margin-top:10px">' +
+    '<div style="font-size:18px;font-weight:700">' + esc(p.description) + '</div>' +
+    '<span class="aide">' + esc(p.code) + ' · stock ' + fmtQte(p.stock || 0) + ' · dates encodées pour ' + fmtQte(avecDate) + ' · <b>' + fmtQte(sansDate) + ' sans date</b></span>' +
+    (lots.length ? '<ul class="histo" style="margin-top:6px">' + lots.map(l => '<li><div class="desc"><span class="echeance ' + niveauLot(l) + '">' + texteEcheance(l) + '</span> <b>' + dateLot(l) + '</b> · ' + fmtQte(l.quantite) + ' u.</div></li>').join('') + '</ul>' : '<p class="aide">Aucune date encodée pour ce produit.</p>') +
+    champsDate('r', true) +
+    '<div class="deux" style="margin-top:8px"><button class="btn second" id="rvAutre">Enregistrer + autre date</button><button class="btn" id="rvSuivant">Enregistrer + produit suivant</button></div>' +
+    '<button class="lien" id="rvPasser">Produit suivant sans enregistrer</button></div>';
+  brancherDate('r');
+  if (garde) { $('rDate').value = garde.d; $('rQte').value = garde.q; majTexteDate('r'); }
+  if (!$('rQte').value && sansDate > 0) $('rQte').value = String(sansDate).replace('.', ',');
+  $('rvAutre').onclick = () => enregistrerReleve(false);
+  $('rvSuivant').onclick = () => enregistrerReleve(true);
+  $('rvPasser').onclick = produitSuivantReleve;
+  if (!garde) $('rDate').focus();
+}
+function enregistrerReleve(suivant) {
+  const p = catalogue.get(releveCode);
+  if (!p) return;
+  const d = lireDate('r');
+  if (d === false) return;
+  const q = lireNombre($('rQte').value);
+  if (!d) { toast('Indiquez la date.', 'warn'); $('rDate').focus(); return; }
+  if (!q || q <= 0) { toast('Indiquez la quantité.', 'warn'); $('rQte').focus(); return; }
+  if (joursRestants(d.peremption) < 0 && !confirm('Cette date est déjà dépassée. Enregistrer quand même ?')) return;
+  db.collection('lots').add(nouveauLot(releveCode, p, d, q, 'releve')).catch(e => toast('Refusé : ' + (e.code || e.message), 'ko'));
+  toast('✓ ' + p.description + ' : ' + fmtQte(q) + ' u. au ' + dateLot(d));
+  $('rDate').value = ''; $('rQte').value = ''; majTexteDate('r');
+  if (suivant) produitSuivantReleve(); else { renderProduitReleve(); $('rDate').focus(); }
+}
+function produitSuivantReleve() {
+  releveCode = null;
+  $('rvProduit').innerHTML = '';
+  $('rvSaisie').focus();
+  demarrerCamReleve();
+}
+
+// ============================================================
+//  CORRIGER LE CODE-BARRES D'UN PRODUIT
+//  Le produit passe sur le nouveau code avec stock, prix, dates et historique ;
+//  l'ancienne fiche est archivée et pointe vers la nouvelle.
+// ============================================================
+// Code du produit actif (suit les fiches remplacées)
+function codeActuel(code) {
+  let c = code, garde = 0;
+  while (catalogue.get(c) && catalogue.get(c).remplacePar && catalogue.has(catalogue.get(c).remplacePar) && garde++ < 5) c = catalogue.get(c).remplacePar;
+  return c;
+}
+function ouvrirCorrectionCode() {
+  const p = catalogue.get(ficheCourante.code);
+  if (!p) return;
+  const ancien = p.code;
+  nettoyerFiche();
+  ficheCourante = { mode: 'correction', code: ancien };
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>Corriger le code-barres</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<p><b>' + esc(p.description) + '</b><br><span class="aide">Code actuel : ' + esc(ancien) + ' · stock ' + fmtQte(p.stock || 0) + '</span></p>' +
+    '<label for="ccCode">Bon code-barres</label><input type="text" id="ccCode" inputmode="numeric" autocomplete="off" placeholder="Scanner (douchette) ou taper le code">' +
+    '<div class="aide" id="ccInfo"></div>' +
+    '<label class="coche" style="margin-top:10px"><input type="checkbox" id="ccGarder" checked> Garder aussi l\'ancien code ' + esc(ancien) + ' (code secondaire)</label>' +
+    '<p class="aide" style="margin-top:0">À garder si la caisse ou des factures utilisent encore l\'ancien code. Décochez s\'il était faux (mal lu, autre produit).</p>' +
+    '<p class="aide">Le stock, le prix d\'achat, les infos, les dates de péremption et l\'historique passent sur le nouveau code.</p>' +
+    '<div class="actions"><button class="btn second" id="ccNon">Retour</button><button class="btn" id="ccOk">Corriger</button></div>';
+  $('fX').onclick = fermerFiche;
+  $('ccNon').onclick = () => ouvrirFiche('modif', catalogue.get(ancien));
+  $('ccCode').oninput = () => {
+    const n = normaliserCode($('ccCode').value);
+    const v = $('ccCode').value.trim();
+    if (!v) { $('ccInfo').textContent = ''; return; }
+    if (!n.ok) { $('ccInfo').innerHTML = '<span class="sansprix">' + esc(n.raison) + '</span>'; return; }
+    const ex = trouverCode(n.code);
+    $('ccInfo').innerHTML = ex && ex !== ancien ? '<span class="sansprix">Déjà utilisé par « ' + esc(catalogue.get(ex).description) + ' »</span>' : '→ nouveau code : <b>' + esc(n.code) + '</b>';
+  };
+  $('ccCode').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('ccOk').click(); } };
+  $('ccOk').onclick = () => corrigerCode(ancien, $('ccCode').value, $('ccGarder').checked);
+  $('ccCode').focus();
+}
+async function corrigerCode(ancien, saisie, garder) {
+  const n = normaliserCode(saisie);
+  if (!n.ok) { toast(n.raison, 'warn'); return; }
+  const nouveau = n.code;
+  if (nouveau === ancien) { toast('C\'est déjà le code de ce produit.', 'warn'); return; }
+  if (catalogue.has(nouveau) || aliasMap.has(nouveau)) { toast('Ce code est déjà utilisé par « ' + ((catalogue.get(trouverCode(nouveau)) || {}).description || nouveau) + ' ».', 'warn'); return; }
+  if (!navigator.onLine) { toast('La correction demande une connexion.', 'warn'); return; }
+  const p = catalogue.get(ancien);
+  if (!confirm('Passer « ' + p.description + ' » du code ' + ancien + ' au code ' + nouveau + ' ?' + (garder ? '\n\nL\'ancien code restera reconnu.' : '\n\nL\'ancien code ne sera plus reconnu.'))) return;
+  const FV = firebase.firestore.FieldValue;
+  $('ccOk').disabled = true;
+  try {
+    // 1. Nouvelle fiche (transaction : le code ne doit pas exister)
+    const copie = {};
+    Object.entries(p).forEach(([k, v]) => { if (!['code', 'archive', 'archivePar', 'archiveLe', 'remplacePar'].includes(k)) copie[k] = v; });
+    const fiche = Object.assign(copie, {
+      code: nouveau, stock: p.stock || 0, ancienCodes: (p.ancienCodes || []).concat([ancien]),
+      creePar: p.creePar || utilisateur, codeCorrigePar: utilisateur, codeCorrigeLe: FV.serverTimestamp()
+    });
+    const ref = db.collection('produits').doc(nouveau);
+    const ok = await db.runTransaction(async tx => {
+      const s = await tx.get(ref);
+      if (s.exists) return false;
+      tx.set(ref, fiche);
+      return true;
+    });
+    if (!ok) { toast('Ce code vient d\'être créé par l\'autre téléphone.', 'warn'); $('ccOk').disabled = false; return; }
+    const lot = db.batch();
+    // 2. Ancienne fiche archivée, avec renvoi
+    lot.update(db.collection('produits').doc(ancien), { archive: true, archivePar: utilisateur, archiveLe: FV.serverTimestamp(), remplacePar: nouveau, stock: 0 });
+    // 3. Codes secondaires, ancien code
+    aliasMap.forEach((c, a) => { if (c === ancien) lot.set(db.collection('alias').doc(a), { code: nouveau, description: p.description, creePar: utilisateur }); });
+    if (garder) lot.set(db.collection('alias').doc(ancien), { code: nouveau, description: p.description, creePar: utilisateur, creeLe: FV.serverTimestamp() });
+    // 4. Dates de péremption en cours
+    lotsActifs.filter(l => l.code === ancien).forEach(l => {
+      const d = {}; Object.entries(l).forEach(([k, v]) => { if (k !== 'id') d[k] = v; });
+      lot.set(db.collection('lots').doc(), Object.assign(d, { code: nouveau }));
+      lot.update(db.collection('lots').doc(l.id), { statut: 'transfere', closPar: utilisateur, closLe: FV.serverTimestamp() });
+    });
+    await lot.commit();
+    // 5. Correspondances des factures
+    const corr = await db.collection('correspondances').where('code', '==', ancien).get();
+    if (corr.size) {
+      const l2 = db.batch();
+      corr.forEach(d => l2.update(db.collection('correspondances').doc(d.id), { code: nouveau }));
+      await l2.commit();
+    }
+    toast('Code corrigé : ' + nouveau);
+    ouvrirFiche('modif', catalogue.get(nouveau) || fiche);
+  } catch (e) {
+    console.error(e);
+    toast('Correction impossible : ' + (e.code || e.message), 'ko');
+    if ($('ccOk')) $('ccOk').disabled = false;
+  }
+}
+// ============================================================
 //  CATALOGUE
 // ============================================================
 // Codes rapport présents : catégories connues + codes portés par des produits, dans l'ordre des codes
@@ -3569,6 +4153,7 @@ function nomCategorie(c) {
   return c && c !== '0000' ? 'Code ' + c : 'Autre';
 }
 $('iZero').addEventListener('change', renderInventaire);
+$('perReleve').addEventListener('click', ouvrirReleveDates);
 $('iImprimer').addEventListener('click', () => { renderInventaire(); window.print(); });
 $('iExporter').addEventListener('click', () => {
   const num = v => v == null ? '' : String(v).replace('.', ',');
@@ -4169,7 +4754,7 @@ async function annulerRemise(id) {
       const lot = db.batch();
       lignes.slice(i, i + 200).forEach(m => {
         lot.update(db.collection('mouvements').doc(m.id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
-        lot.update(db.collection('produits').doc(m.code), { stock: FV.increment(-m.quantite) });
+        lot.update(db.collection('produits').doc(codeActuel(m.code)), { stock: FV.increment(-m.quantite) });
       });
       await lot.commit();
     }
@@ -4204,7 +4789,9 @@ function guideHTML() {
   '<li>Avec une douchette, ou pour taper un code : cliquez dans le champ « saisir / douchette » puis scannez ou tapez et faites Entrée.</li>' +
   '<li>Produit connu : sa fiche s\'ouvre. Produit inconnu : la fiche « Nouveau produit » s\'ouvre.</li></ol>' +
   '<div class="astuce">Les articles sans code-barres (bonbonnes de gaz, cautions, caisse Jupiler…) ont un numéro interne de 5 ou 6 chiffres : tapez-le dans le champ, ou cherchez-les par leur nom dans le Catalogue.</div>' +
-  '<p>« Code mal lu » : le code n\'est pas valide, rescannez.</p></details>' +
+  '<p>« Code mal lu » : le code n\'est pas valide, rescannez.</p>' +
+  '<p>Si plusieurs codes-barres sont visibles (produit voisin, carton), l\'appli prend <b>celui qui est au centre du cadre</b> : visez bien le code du produit.</p>' +
+  '<p>Les grands codes des cartons (GS1) sont aussi reconnus : ils donnent le code du carton et, souvent, sa date de péremption, qui est alors proposée dans l\'entrée.</p></details>' +
 
   '<details><summary>3. Créer un nouveau produit</summary>' +
   '<ol><li>Scannez-le : si Open Food Facts le connaît, la désignation est proposée. Vérifiez-la.</li>' +
@@ -4213,6 +4800,8 @@ function guideHTML() {
   '<p><b>Même article, nouveau code-barres ?</b> (le fabricant a changé le code, ou un autre format du même produit est vendu au même prix) : sur l\'écran « Nouveau produit », ouvrez <b>C\'est un article déjà dans la liste ?</b>, cherchez-le par son nom et touchez <b>C\'est lui</b>. Le nouveau code est rattaché à la fiche existante : même stock, même historique, et il sera reconnu au scan, dans les factures et dans les ventes de shift.</p>' +
   '<p>Si l\'appli affiche « Ressemble à un produit existant », vérifiez que ce n\'est pas le même article : si c\'est lui, touchez <b>C\'est lui</b>.</p>' +
   '<p>Les codes rattachés se voient (et se retirent) dans la fiche → Infos produit → « Autres codes-barres de ce produit ». On peut aussi y ajouter un code directement.</p>' +
+  '<p>Le code-barres lu s\'affiche en grand en haut de « Nouveau produit ». <b>Vérifiez-le</b> avec l\'emballage. Si ce n\'est pas le bon : <b>Ce n\'est pas le bon code ?</b> → tapez le bon code, ou « Rescanner avec la caméra ».</p>' +
+  '<p><b>Produit déjà créé avec un mauvais code</b> : fiche → Infos produit → <b>Corriger le code-barres…</b>. Tapez ou scannez le bon code. Le stock, le prix d\'achat, les infos, les dates de péremption et l\'historique passent sur le bon code. Cochez « Garder aussi l\'ancien code » si la caisse ou les factures utilisent encore l\'ancien ; décochez-la s\'il était faux.</p>' +
   '<p>Si l\'autre téléphone vient de créer le même produit, vous voyez « Déjà créé par … » et sa fiche s\'ouvre : rien n\'est créé en double.</p>' +
   '<p>Produit sans code-barres : bouton <b>Produit sans code-barres</b> dans Scanner, un numéro interne est attribué.</p></details>' +
 
@@ -4242,8 +4831,13 @@ function guideHTML() {
 
   '<details><summary>6. Dates de péremption</summary>' +
   '<p>Le suivi est actif pour l\'alimentation, les glaces, les boissons et les bières. Il se règle par catégorie (Outils → Catégories) ou par produit (fiche → Infos produit).</p>' +
-  '<ol><li><b>À la livraison</b> : dans « Encoder une entrée », remplissez la <b>date de péremption</b> lue sur l\'emballage. Cochez « Mois et année seulement » pour une date du type « à consommer de préférence avant fin 11/2026 ».</li>' +
-  '<li><b>Pour le stock déjà en rayon</b> : fiche du produit → Dates de péremption → « + Ajouter une date » (date et quantité).</li></ol>' +
+  '<p><b>Taper une date</b> : seulement les chiffres, l\'appli comprend et affiche la date en toutes lettres pour vérifier.</p><ul>' +
+  '<li><b>050427</b>, 05-04-27, 5/4/27 ou 05.04.2027 → 5 avril 2027</li>' +
+  '<li><b>0527</b>, 05-27 ou 5/27 → fin mai 2027 (mois et année seulement, « à consommer de préférence avant fin… »)</li></ul>' +
+  '<p><b>📷 à côté de la date (essai)</b> : visez la date dans le cadre jaune. L\'appli propose les dates lues : touchez la bonne. Rien n\'est enregistré sans votre choix. Ça marche bien sur une date nette imprimée sur une étiquette, moins bien sur les dates en petits points (canettes, bouteilles) ou sur fond brillant : tapez-la alors. Au premier usage, l\'appli télécharge le module de lecture (environ 4 Mo). Si un carton porte un code GS1 avec la date, elle est lue tout de suite, sans erreur.</p>' +
+  '<ol><li><b>À la livraison</b> : dans « Encoder une entrée », remplissez la <b>date de péremption</b> lue sur l\'emballage.</li>' +
+  '<li><b>Pour le stock déjà en rayon</b> : fiche du produit → Dates de péremption → « + Ajouter une date » (date et quantité).</li>' +
+  '<li><b>Plusieurs produits ou plusieurs dates à la suite</b> : onglet Péremption → <b>📅 Relevé des dates</b>. Scannez un produit : son stock et ses dates déjà connues s\'affichent, avec le nombre d\'unités <b>sans date</b> (proposé comme quantité). Encodez la date et la quantité, puis <b>Enregistrer + autre date</b> (même produit, autre date) ou <b>Enregistrer + produit suivant</b> (la caméra se rouvre). Le stock ne change pas.</li></ol>' +
   '<p><b>Alertes</b> : <span class="echeance rouge">rouge</span> si c\'est périmé ou à 7 jours ou moins, <span class="echeance orange">orange</span> jusqu\'à 30 jours. Les seuils se règlent dans Outils. Un bandeau s\'affiche à l\'ouverture (✕ pour le masquer jusqu\'au lendemain), l\'onglet Péremption affiche le nombre de lots urgents, et le Catalogue montre un badge ⏰.</p>' +
   '<p>Pour chaque lot :</p><ul>' +
   '<li><b>Épuisé</b> : tout a été vendu, le lot n\'est plus signalé.</li>' +
@@ -4326,6 +4920,7 @@ function guideHTML() {
 
   '<details><summary>15. Questions fréquentes</summary>' +
   '<p><b>La caméra ne s\'ouvre pas ?</b> Autorisez la caméra pour le site dans Chrome (cadenas à gauche de l\'adresse).</p>' +
+  '<p><b>L\'appli a enregistré un autre code que celui du produit ?</b> Fiche → Infos produit → Corriger le code-barres (rubrique 3).</p>' +
   '<p><b>Un produit scanné est « inconnu » alors qu\'il existe ?</b> Le fabricant a peut-être changé le code-barres : sur l\'écran « Nouveau produit », utilisez « C\'est un article déjà dans la liste ? » pour rattacher le nouveau code (rubrique 3).</p>' +
   '<p><b>Un inventaire rapide est en cours et je dois importer une facture ou un shift ?</b> Clôturez d\'abord le comptage, sinon les quantités comptées ne tiennent pas compte de l\'import. L\'appli prévient.</p>' +
   '<p><b>Un produit a disparu du Catalogue ?</b> Il a peut-être été retiré : Outils → Produits retirés du catalogue.</p>' +

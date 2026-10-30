@@ -1,7 +1,7 @@
 // Service Worker — Stock Shop Paliseul
 // Stratégie Network First : on prend toujours la dernière version en ligne,
 // le cache ne sert que hors connexion. Incrémenter VERSION à chaque livraison.
-const VERSION = 'v0.5.5';
+const VERSION = 'v0.6.0';
 const CACHE = 'stock-shop-' + VERSION;
 const FICHIERS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './station.jpg'];
 
@@ -23,7 +23,8 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   // Firebase (données, connexion) et Open Food Facts gèrent eux-mêmes le réseau
   if (url.hostname.endsWith('googleapis.com') || url.hostname.endsWith('firebaseapp.com') || url.hostname.includes('openfoodfacts')) return;
-  const ok = url.origin === self.location.origin || url.hostname === 'www.gstatic.com';
+  // Module de lecture des dates (Tesseract) : gardé pour fonctionner aussi hors connexion
+  const ok = url.origin === self.location.origin || url.hostname === 'www.gstatic.com' || url.hostname === 'cdn.jsdelivr.net' || url.hostname === 'tessdata.projectnaptha.com';
   if (!ok) return;
 
   e.respondWith(
