@@ -187,6 +187,12 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 .guide ul,.guide ol{padding-left:20px;margin:6px 0 10px}
 .guide .astuce{background:#eef3fa;border-radius:8px;padding:8px 10px;font-size:14px;margin:8px 0 10px}
 .guide-impr{display:none}
+.recherche-nom{position:relative}
+.recherche-nom .effacer{position:absolute;right:6px;top:50%;transform:translateY(-50%)}
+#sNomListe li.creer{background:#f3f6fa;cursor:pointer}
+#sNomListe li.creer b{color:var(--bleu)}
+#fMots{margin-top:6px}
+#fMots .puce{font-size:13px;padding:4px 10px}
 .code-lu{background:#eef3fa;border:1px solid #cbd9ec;border-radius:10px;padding:10px 12px;margin:6px 0;font-size:15px}
 .code-lu b{font-size:19px;letter-spacing:1px}
 #fondDate{position:fixed;inset:0;background:rgba(15,25,40,.6);z-index:70;display:flex;align-items:flex-end;justify-content:center}
@@ -281,6 +287,12 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
           <input type="text" id="sSaisie" inputmode="numeric" autocomplete="off" placeholder="Code-barres puis Entrée">
           <button class="btn" id="sOk">OK</button>
         </div>
+        <label for="sNom">Ou chercher par nom</label>
+        <div class="recherche-nom">
+          <input type="search" id="sNom" autocomplete="off" placeholder="ex. coca 33, jup cas, chocomel…">
+          <button class="effacer cache" id="sNomEffacer" aria-label="Effacer">✕</button>
+        </div>
+        <ul class="liste" id="sNomListe"></ul>
         <div id="sResultat"></div>
         <button class="btn second plein" id="sSansCode" style="margin-top:12px">Produit sans code-barres</button>
       </div>
@@ -461,11 +473,18 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.6.0';
+const VERSION = 'v0.6.1';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.6.1', date: '01/11/2026', points: [
+    'Scanner → « Ou chercher par nom » : l\'appli propose les produits au fil de la frappe, sans tenir compte des majuscules ni des accents, mots dans n\'importe quel ordre, débuts de mots et petites fautes (« chokomel » trouve Chocomel).',
+    'Produit introuvable : « + Créer le produit » avec le nom déjà rempli ; on peut y taper ou scanner son code-barres.',
+    'Nouveau produit : des mots déjà utilisés dans le catalogue sont proposés pendant la frappe (« marl » → Marlboro).',
+    'La même recherche tolérante dans le Catalogue, l\'Inventaire rapide et « C\'est un article déjà dans la liste ? ».',
+    'Prix d\'achat seul (sans changer le stock) dans la fiche produit, et liste « Prix d\'achat manquants » à compléter à la suite (onglet Inventaire).'
+  ] },
   { v: 'v0.6.0', date: '30/10/2026', points: [
     'Scan : la caméra prend le code-barres le plus au centre du cadre (et plus le produit voisin).',
     'Nouveau produit : le code lu s\'affiche en grand, avec « Ce n\'est pas le bon code » pour le corriger ou rescanner avant la création.',
@@ -1140,6 +1159,7 @@ function champsProduit(p) {
   const tva = p.tvaPct != null ? p.tvaPct : (CATEGORIES[cat] ? CATEGORIES[cat].tva : 21);
   return '<label for="fDesc">Désignation *</label>' +
     '<input type="text" id="fDesc" maxlength="40" value="' + esc(p.description || '') + '">' +
+    '<div class="puces" id="fMots"></div>' +
     '<div id="fSemblables"></div>' +
     '<label for="fCat">Catégorie</label>' +
     '<select id="fCat">' + optionsCategories(cat) + '</select>' +
@@ -1178,7 +1198,8 @@ async function ouvrirFiche(mode, p) {
         ? '<div class="code-lu">Code-barres : <b>' + esc(ficheCourante.code) + '</b><br><button class="lien" id="fPasBon" style="margin-top:4px">Ce n\'est pas le bon code ?</button>' +
           '<div id="fCorrCode" class="cache"><div class="ligne" style="margin-top:6px"><input type="text" id="fCodeNouv" inputmode="numeric" autocomplete="off" placeholder="Taper ou scanner le bon code"><button class="btn" id="fCodeOk">OK</button></div>' +
           '<button class="lien" id="fRescan">Rescanner avec la caméra</button></div></div>'
-        : '<div class="aide">Un code interne sera attribué automatiquement</div>') +
+        : '<label for="fCodeOpt">Code-barres (facultatif)</label><input type="text" id="fCodeOpt" inputmode="numeric" autocomplete="off" placeholder="Scanner (douchette) ou taper ; vide = code interne">' +
+          '<div class="aide" id="fCodeOptInfo">Sans code-barres : un numéro interne (20…) sera attribué.</div>') +
       '<div id="fInfoOFF" class="aide"></div>' +
       (ficheCourante.code ? blocRattacher() : '') +
       champsProduit(p) +
@@ -1188,7 +1209,13 @@ async function ouvrirFiche(mode, p) {
     $('fEnregistrer').onclick = enregistrerFiche;
     $('fCat').onchange = () => { const c = CATEGORIES[$('fCat').value]; if (c) $('fTva').value = String(c.tva); };
     let attente = null;
-    $('fDesc').oninput = () => { clearTimeout(attente); attente = setTimeout(majSemblables, 300); };
+    $('fDesc').oninput = () => { clearTimeout(attente); attente = setTimeout(majSemblables, 300); renderMotsProposes(); };
+    brancherMotsProposes();
+    if ($('fCodeOpt')) $('fCodeOpt').oninput = () => {
+      const v = $('fCodeOpt').value.trim(), n = normaliserCode(v);
+      const ex = n.ok ? trouverCode(n.code) : null;
+      $('fCodeOptInfo').textContent = !v ? 'Sans code-barres : un numéro interne (20…) sera attribué.' : !n.ok ? '⚠️ ' + n.raison : ex ? '⚠️ Ce code existe déjà : « ' + catalogue.get(ex).description + ' »' : '→ code ' + n.code;
+    };
     if ($('fPasBon')) {
       $('fPasBon').onclick = () => { $('fCorrCode').classList.toggle('cache'); $('fCodeNouv').focus(); };
       const corriger = () => {
@@ -1231,6 +1258,7 @@ async function ouvrirFiche(mode, p) {
     p.archive ? '<div class="alerte">Ce produit est <b>retiré du catalogue</b>' + (p.archivePar ? ' (par ' + esc(p.archivePar) + (p.archiveLe ? ' le ' + dateTexte(p.archiveLe) : '') + ')' : '') +
       '. <button class="btn petit" id="frReactiver">Réactiver</button></div>' : '') +
     '<div class="resume" id="fResume"></div>' +
+    blocPrixSeul(p) +
     blocEntree(p) +
     (suiviPeremption(p) || lotsActifs.some(l => l.code === p.code) ? blocPeremption(p) : '') +
     blocComptage() +
@@ -1263,6 +1291,7 @@ async function ouvrirFiche(mode, p) {
   brancherDate('e');
   brancherPeremptionFiche();
   $('soOk').onclick = sortirStock;
+  brancherPrixSeul();
   if ($('frRetirer')) $('frRetirer').onclick = retirerDuCatalogue;
   if ($('frCorrCode')) $('frCorrCode').onclick = ouvrirCorrectionCode;
   if ($('frNouvelle')) $('frNouvelle').onclick = () => { const c = codeActuel(p.code); if (catalogue.has(c)) ouvrirFiche('modif', catalogue.get(c)); };
@@ -1329,7 +1358,15 @@ async function enregistrerFiche() {
     consigne: lireNombre($('fConsigne').value),
     suiviPeremption: $('fSuivi').value === '' ? null : $('fSuivi').value === 'oui'
   };
-  const { mode, code } = ficheCourante;
+  let { mode, code } = ficheCourante;
+  // Nouveau produit sans code scanné : code-barres tapé dans le champ facultatif
+  if (mode === 'nouveau' && !code && $('fCodeOpt') && $('fCodeOpt').value.trim()) {
+    const n = normaliserCode($('fCodeOpt').value);
+    if (!n.ok) { toast(n.raison, 'warn'); $('fCodeOpt').focus(); return; }
+    const ex = trouverCode(n.code);
+    if (ex) { toast('Ce code existe déjà : fiche ouverte.', 'warn'); ouvrirFiche('modif', catalogue.get(ex)); return; }
+    code = n.code;
+  }
   if (mode === 'modif') {
     const avant = catalogue.get(code) || {};
     const suiviChange = suiviPeremption(avant) !== suiviPeremption(Object.assign({}, avant, donnees));
@@ -1608,6 +1645,8 @@ function renderHistorique() {
       if (det) txt += '<br><span class="aide">' + esc(det) + '</span>';
     } else if (m.type === 'vente') {
       txt = 'Vente shift ' + esc(m.shift) + ' : <b>' + fmtQte(m.quantite) + '</b>' + (m.montantTTC != null ? ' · ' + euro(m.montantTTC) + ' TTC' : '');
+    } else if (m.type === 'prix') {
+      txt = 'Prix d\'achat encodé : <b>' + fmtPU(m.prixUnitaireHT) + ' HT</b> (sans quantité)' + (m.fournisseur ? '<br><span class="aide">' + esc(m.fournisseur) + '</span>' : '');
     } else if (m.type === 'restauration') {
       txt = 'Restauration d\'une sauvegarde : ' + fmtQte(m.stockAvant) + ' → <b>' + fmtQte(m.stockCompte) + '</b> (' + (m.quantite > 0 ? '+' : '') + fmtQte(m.quantite) + ')';
     } else if (m.type === 'sortie') {
@@ -1642,9 +1681,9 @@ async function annulerMouvement(id) {
   const lot = db.batch();
   lot.update(db.collection('mouvements').doc(id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
   const maj = { stock: FV.increment(-m.quantite) };
-  if (m.type === 'entree') {
+  if (m.type === 'entree' || m.type === 'prix') {
     // Le dernier prix redevient celui de l'entrée valide la plus récente
-    const precedente = historiqueCourant.find(x => x.type === 'entree' && !x.annulee && x.id !== id);
+    const precedente = historiqueCourant.find(x => (x.type === 'entree' || x.type === 'prix') && !x.annulee && x.id !== id);
     maj.dernierPrixHT = precedente ? precedente.prixUnitaireHT : null;
     maj.dernierFournisseur = precedente ? (precedente.fournisseur || null) : null;
   }
@@ -2764,11 +2803,9 @@ function blocRattacher() {
     '<ul class="liste" id="rqListe"></ul></details>';
 }
 function renderRattacher() {
-  const q = normaliserTexte($('rqRecherche').value.trim());
-  if (q.length < 2) { $('rqListe').innerHTML = '<li class="groupe aide">Tapez au moins 2 lettres.</li>'; return; }
-  const l = [...catalogue.values()].filter(actif)
-    .filter(p => normaliserTexte(p.description).includes(q) || String(p.code).includes(q))
-    .sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr')).slice(0, 12);
+  const brut = $('rqRecherche').value.trim();
+  if (normaliserTexte(brut).length < 2) { $('rqListe').innerHTML = '<li class="groupe aide">Tapez au moins 2 lettres.</li>'; return; }
+  const l = rechercheProduits(brut, 12).map(x => x.p).filter(p => p.code !== (ficheCourante && ficheCourante.code));
   $('rqListe').innerHTML = l.length ? l.map(p => '<li data-principal="' + esc(p.code) + '"><div class="desc"><div class="nom">' + esc(p.description) + '</div>' +
     '<div class="sous">' + esc(p.code) + ' · ' + esc(libCategorie(p.codeRapport || '0000')) + '</div></div><span class="badge">C\'est lui</span></li>').join('')
     : '<li class="groupe aide">Aucun produit trouvé.</li>';
@@ -3031,7 +3068,7 @@ function renderEcranComptage() {
   b[0].classList.toggle('actif', vueComptage === 'reste');
   b[1].classList.toggle('actif', vueComptage === 'comptes');
   const f = normaliserTexte($('icFiltre').value.trim());
-  const filtre = x => !f || normaliserTexte(x.description).includes(f) || String(x.code).includes(f);
+  const filtre = x => !f || String(x.code).includes(f) || correspond(x, $('icFiltre').value);
   const tri = (a, c) => String(a.description).localeCompare(String(c.description), 'fr', { sensitivity: 'base' });
   if (vueComptage === 'reste') {
     const l = reste.filter(filtre).sort(tri);
@@ -3138,7 +3175,7 @@ async function recalculerPrix(codes, exclus) {
     const tous = [code].concat(catalogue.get(code).ancienCodes || []).slice(0, 10);
     const snap = await db.collection('mouvements').where('code', 'in', tous).get();
     const achats = [];
-    snap.forEach(d => { const m = d.data(); if (m.type === 'entree' && !m.annulee && !ex.has(d.id)) achats.push(m); });
+    snap.forEach(d => { const m = d.data(); if ((m.type === 'entree' || m.type === 'prix') && !m.annulee && !ex.has(d.id)) achats.push(m); });
     achats.sort((a, b) => ms(b.le) - ms(a.le));
     const der = achats[0];
     lot.update(db.collection('produits').doc(code), {
@@ -3337,7 +3374,7 @@ async function calculerArrete() {
       const m = doc.data();
       if (m.annulee || !(dateMv(m) > d)) return;
       delta.set(m.code, (delta.get(m.code) || 0) + m.quantite);
-      if (m.type === 'entree') achatsApres.add(m.code);
+      if (m.type === 'entree' || m.type === 'prix') achatsApres.add(m.code);
       nb++;
     });
     // Prix d'achat à la date : dernier achat daté au plus tard ce jour-là
@@ -3345,7 +3382,7 @@ async function calculerArrete() {
     for (const code of achatsApres) {
       const s2 = await db.collection('mouvements').where('code', '==', code).get();
       let best = null;
-      s2.forEach(x => { const m = x.data(); if (m.type === 'entree' && !m.annulee && dateMv(m) <= d && (!best || ms(m.le) > ms(best.le))) best = m; });
+      s2.forEach(x => { const m = x.data(); if ((m.type === 'entree' || m.type === 'prix') && !m.annulee && dateMv(m) <= d && (!best || ms(m.le) > ms(best.le))) best = m; });
       prix.set(code, best ? best.prixUnitaireHT : null);
     }
     const ordre = Object.keys(CATEGORIES);
@@ -3910,6 +3947,282 @@ async function corrigerCode(ancien, saisie, garder) {
   }
 }
 // ============================================================
+//  RECHERCHE PAR NOM : sans casse ni accents, mots dans le désordre, débuts de mots, petites fautes
+// ============================================================
+function motsRecherche(s) {
+  return normaliserTexte(s).split(/[^a-z0-9]+/).filter(Boolean);
+}
+// Distance d'édition (avec inversion de deux lettres voisines), arrêtée au-delà de max
+function distance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  const d = [];
+  for (let i = 0; i <= a.length; i++) { d[i] = [i]; }
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    let minLigne = Infinity;
+    for (let j = 1; j <= b.length; j++) {
+      const c = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+      minLigne = Math.min(minLigne, d[i][j]);
+    }
+    if (minLigne > max) return max + 1;
+  }
+  return d[a.length][b.length];
+}
+// Note d'un mot tapé face aux mots du produit : 0 = absent
+function noteMot(q, mots, compact) {
+  let best = 0;
+  for (let k = 0; k < mots.length; k++) {
+    const m = mots[k];
+    if (m === q) return { n: 3, k };
+    if (m.startsWith(q)) { if (!best || best.n < 2.5) best = { n: 2.5, k }; continue; }
+    if (q.length >= 3 && m.includes(q)) { if (!best || best.n < 1.5) best = { n: 1.5, k }; continue; }
+    if (q.length >= 4) {
+      const max = q.length >= 7 ? 2 : 1;
+      // faute de frappe : mot entier, ou début du mot de même longueur (« chocom » ~ « chocomel »)
+      if (distance(q, m, max) <= max || (m.length > q.length && distance(q, m.slice(0, q.length), max) <= max)) {
+        if (!best || best.n < 1) best = { n: 1, k };
+      }
+    }
+  }
+  if (!best && q.length >= 3 && compact.includes(q)) return { n: 1.2, k: -1 };   // « cocacola » dans « coca-cola »
+  return best || null;
+}
+// Note d'un produit pour une recherche (0 = ne correspond pas) et mots trouvés
+function noteProduit(p, motsQ, brut) {
+  const mots = motsRecherche(p.description);
+  const compact = mots.join('');
+  let total = 0;
+  const trouves = new Set();
+  for (const q of motsQ) {
+    const r = noteMot(q, mots, compact);
+    if (!r) {
+      // un nombre tapé peut être un bout du code-barres
+      if (/^\d{3,}$/.test(q) && String(p.code).includes(q)) { total += 1; continue; }
+      return { note: 0 };
+    }
+    total += r.n;
+    if (r.k >= 0) trouves.add(r.k);
+  }
+  if (mots[0] && motsQ[0] && mots[0].startsWith(motsQ[0])) total += 1;           // le nom commence par le 1er mot tapé
+  if (normaliserTexte(p.description).startsWith(normaliserTexte(brut))) total += 1;
+  return { note: total, trouves };
+}
+function rechercheProduits(brut, limite, liste) {
+  const motsQ = motsRecherche(brut);
+  if (!motsQ.length) return [];
+  const res = [];
+  (liste || [...catalogue.values()].filter(actif)).forEach(p => {
+    const r = noteProduit(p, motsQ, brut);
+    if (r.note > 0) res.push({ p, note: r.note, trouves: r.trouves });
+  });
+  res.sort((a, b) => b.note - a.note || String(a.p.description).localeCompare(String(b.p.description), 'fr', { sensitivity: 'base' }));
+  return limite ? res.slice(0, limite) : res;
+}
+function correspond(p, brut) {
+  const motsQ = motsRecherche(brut);
+  return !motsQ.length || noteProduit(p, motsQ, brut).note > 0;
+}
+// Nom avec les mots trouvés en gras
+function nomSurligne(p, trouves) {
+  let i = -1;
+  return String(p.description).split(/([^A-Za-zÀ-ÿ0-9]+)/).map(part => {
+    if (!part || /^[^A-Za-zÀ-ÿ0-9]+$/.test(part)) return esc(part);
+    i++;
+    return trouves && trouves.has(i) ? '<b>' + esc(part) + '</b>' : esc(part);
+  }).join('');
+}
+
+// ---------- Onglet Scanner : chercher par nom ----------
+let choixNom = [];
+function renderRechercheNom() {
+  const brut = $('sNom').value.trim();
+  const ul = $('sNomListe');
+  $('sNomEffacer').classList.toggle('cache', !brut);
+  if (normaliserTexte(brut).replace(/[^a-z0-9]/g, '').length < 2) { ul.innerHTML = ''; choixNom = []; return; }
+  const r = rechercheProduits(brut, 8);
+  choixNom = r.map(x => x.p.code);
+  ul.innerHTML = r.map(x => '<li data-code="' + esc(x.p.code) + '"><div class="desc"><div class="nom">' + nomSurligne(x.p, x.trouves) + '</div>' +
+      '<div class="sous">' + esc(x.p.code) + ' · ' + esc(libCategorie(x.p.codeRapport || '0000')) + '</div></div>' +
+      '<div class="droite"><div class="prix">' + fmtQte(x.p.stock || 0) + ' u.</div></div></li>').join('') +
+    (r.length ? '' : '<li class="groupe aide">Aucun produit ne ressemble à « ' + esc(brut) + ' ».</li>') +
+    '<li class="creer" data-creer-nom="1"><div class="desc"><b>+ Créer le produit « ' + esc(brut.slice(0, 40)) + ' »</b></div></li>';
+}
+$('sNom').addEventListener('input', renderRechercheNom);
+$('sNom').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  if (choixNom.length) ouvrirDepuisNom(choixNom[0]);
+});
+$('sNomEffacer').addEventListener('click', () => { $('sNom').value = ''; renderRechercheNom(); $('sNom').focus(); });
+$('sNomListe').addEventListener('click', e => {
+  if (e.target.closest('[data-creer-nom]')) {
+    if (!navigator.onLine) { toast('La création d\'un produit demande une connexion.', 'warn'); return; }
+    const nom = $('sNom').value.trim().slice(0, 40);
+    ouvrirFiche('nouveau', { code: null, description: nom.charAt(0).toUpperCase() + nom.slice(1) });
+    return;
+  }
+  const li = e.target.closest('li[data-code]');
+  if (li) ouvrirDepuisNom(li.dataset.code);
+});
+function ouvrirDepuisNom(code) {
+  const p = catalogue.get(code);
+  if (!p) return;
+  afficherResultat('✓ <b>' + esc(p.description) + '</b><br><span class="aide">' + esc(p.code) + ' · stock ' + fmtQte(p.stock || 0) + '</span>', 'ok');
+  $('sNom').value = ''; renderRechercheNom();
+  ouvrirFiche('modif', p);
+}
+
+// ---------- Nouveau produit : mots déjà utilisés dans le catalogue ----------
+let motsCatalogue = null, tailleMotsCatalogue = -1;
+function construireMotsCatalogue() {
+  if (motsCatalogue && tailleMotsCatalogue === catalogue.size) return motsCatalogue;
+  const m = new Map();   // mot normalisé -> { formes: Map(forme -> n), n }
+  catalogue.forEach(p => {
+    String(p.description || '').split(/[^A-Za-zÀ-ÿ0-9]+/).filter(w => w.length >= 3 && !/^\d+$/.test(w)).forEach(w => {
+      const k = normaliserTexte(w);
+      if (!m.has(k)) m.set(k, { formes: new Map(), n: 0 });
+      const x = m.get(k); x.n++; x.formes.set(w, (x.formes.get(w) || 0) + 1);
+    });
+  });
+  motsCatalogue = [...m.entries()].map(([k, x]) => ({ k, n: x.n, forme: [...x.formes.entries()].sort((a, b) => b[1] - a[1])[0][0] }));
+  tailleMotsCatalogue = catalogue.size;
+  return motsCatalogue;
+}
+function renderMotsProposes() {
+  const z = $('fMots');
+  if (!z) return;
+  const v = $('fDesc').value;
+  const dernier = (v.match(/([A-Za-zÀ-ÿ0-9]+)$/) || [])[1] || '';
+  const k = normaliserTexte(dernier);
+  if (k.length < 2) { z.innerHTML = ''; return; }
+  const l = construireMotsCatalogue().filter(x => x.k.startsWith(k) && x.k !== k).sort((a, b) => b.n - a.n).slice(0, 6);
+  z.innerHTML = l.map(x => '<button type="button" class="puce" data-mot="' + esc(x.forme) + '">' + esc(x.forme) + '</button>').join('');
+}
+function brancherMotsProposes() {
+  if (!$('fMots')) return;
+  $('fMots').onclick = e => {
+    const b = e.target.closest('[data-mot]');
+    if (!b) return;
+    const v = $('fDesc').value;
+    $('fDesc').value = (v.replace(/([A-Za-zÀ-ÿ0-9]+)$/, '') + b.dataset.mot + ' ').slice(0, 40);
+    $('fDesc').focus();
+    renderMotsProposes();
+    if (typeof majSemblables === 'function') majSemblables();
+  };
+}
+
+// ============================================================
+//  PRIX D'ACHAT SEUL (sans changer le stock)
+// ============================================================
+function blocPrixSeul(p) {
+  const manque = p.dernierPrixHT == null;
+  return '<details class="bloc"' + (manque && (p.stock || 0) > 0 ? ' open' : '') + '><summary>' + (manque ? '⚠️ Prix d\'achat inconnu : l\'encoder' : 'Prix d\'achat HT seul (sans changer le stock)') + '</summary>' +
+    '<div class="deux">' +
+      '<div><label for="psPu">Prix unitaire HT</label><input type="text" id="psPu" inputmode="decimal" autocomplete="off" placeholder="ex. 1,25"></div>' +
+      '<div><label for="psFourn">Fournisseur</label><input type="text" id="psFourn" autocomplete="off" value="' + esc(p.dernierFournisseur || '') + '"></div>' +
+    '</div>' +
+    '<div class="deux"><div><label for="psCarton">ou prix du carton HT</label><input type="text" id="psCarton" inputmode="decimal" autocomplete="off"></div>' +
+      '<div><label for="psUpc">unités / carton</label><input type="text" id="psUpc" inputmode="decimal" autocomplete="off" value="' + esc(p.uniteParCarton || '') + '"></div></div>' +
+    '<div class="aide" id="psCalc"></div>' +
+    '<button class="btn second plein" id="psOk" style="margin-top:8px">Enregistrer le prix d\'achat</button>' +
+    '<p class="aide">Pour le stock déjà en rayon (comptage de départ) : seul le prix d\'achat change, pas la quantité. Il sert à la valeur d\'inventaire.</p></details>';
+}
+function lirePrixSeul() {
+  const pu = lireNombre($('psPu').value);
+  if (pu != null && pu > 0) return arrondi(pu, 4);
+  const pc = lireNombre($('psCarton').value), upc = lireNombre($('psUpc').value);
+  if (pc > 0 && upc > 0) return arrondi(pc / upc, 4);
+  return null;
+}
+function brancherPrixSeul() {
+  if (!$('psOk')) return;
+  const maj = () => { const pu = lirePrixSeul(); $('psCalc').textContent = pu != null && !$('psPu').value.trim() ? '→ ' + fmtPU(pu) + ' HT l\'unité' : ''; };
+  ['psPu', 'psCarton', 'psUpc'].forEach(id => { $(id).oninput = maj; });
+  $('psOk').onclick = () => {
+    const pu = lirePrixSeul();
+    if (pu == null) { toast('Indiquez le prix unitaire HT (ou le prix du carton et les unités).', 'warn'); return; }
+    enregistrerPrixSeul(ficheCourante.code, pu, $('psFourn').value.trim());
+    $('psPu').value = ''; $('psCarton').value = ''; $('psCalc').textContent = '';
+  };
+}
+function enregistrerPrixSeul(code, pu, fournisseur) {
+  const p = catalogue.get(code);
+  if (!p) return;
+  if (p.dernierPrixHT > 0 && Math.abs(pu - p.dernierPrixHT) / p.dernierPrixHT > ECART_PRIX_MAX &&
+    !confirm('Prix inhabituel : ' + fmtPU(pu) + ' HT, contre ' + fmtPU(p.dernierPrixHT) + ' jusqu\'ici.\n\nConfirmer ce prix ?')) return false;
+  const FV = firebase.firestore.FieldValue;
+  const lot = db.batch();
+  lot.set(db.collection('mouvements').doc(), {
+    type: 'prix', code, description: p.description || '', quantite: 0, prixUnitaireHT: pu, fournisseur: fournisseur || null,
+    par: utilisateur, le: FV.serverTimestamp(), jour: jourLocal(), annulee: false
+  });
+  const maj = { dernierPrixHT: pu, dernierAchatLe: FV.serverTimestamp() };
+  if (fournisseur) maj.dernierFournisseur = fournisseur;
+  lot.update(db.collection('produits').doc(code), maj);
+  lot.commit().catch(e => toast('Refusé : ' + (e.code || e.message), 'ko'));
+  toast('Prix d\'achat enregistré : ' + fmtPU(pu) + ' HT');
+  return true;
+}
+
+// ---------- Liste des produits en stock sans prix d'achat ----------
+function ouvrirPrixManquants() {
+  arreterCamera();
+  nettoyerFiche();
+  ficheCourante = null;
+  $('fenetre').innerHTML =
+    '<div class="tete"><h2>Prix d\'achat manquants</h2><button class="fermer" id="fX" aria-label="Fermer">✕</button></div>' +
+    '<p class="aide" style="margin-top:0">Produits en stock sans prix d\'achat : ils comptent pour 0 € dans l\'inventaire. Tapez le prix unitaire HT puis Entrée (passe au suivant). Le stock ne change pas.</p>' +
+    '<input type="search" id="pmFiltre" placeholder="Filtrer (nom, code)…" autocomplete="off">' +
+    '<div class="compteur" id="pmCompteur"></div><ul class="liste" id="pmListe"></ul>';
+  $('fond').classList.remove('cache');
+  $('fX').onclick = fermerFiche;
+  $('pmFiltre').oninput = renderPrixManquants;
+  $('pmListe').onkeydown = e => {
+    if (e.key !== 'Enter' || !e.target.dataset.pm) return;
+    e.preventDefault();
+    validerPrixManquant(e.target);
+  };
+  $('pmListe').onclick = e => {
+    const b = e.target.closest('[data-pmok]');
+    if (b) validerPrixManquant(document.querySelector('[data-pm="' + b.dataset.pmok + '"]'));
+  };
+  renderPrixManquants();
+}
+function produitsSansPrix() {
+  return [...catalogue.values()].filter(p => actif(p) && (p.stock || 0) > 0 && p.dernierPrixHT == null);
+}
+function renderPrixManquants() {
+  const ul = $('pmListe');
+  if (!ul) return;
+  const f = $('pmFiltre').value;
+  const tous = produitsSansPrix();
+  const l = (f.trim() ? rechercheProduits(f, 0, tous).map(x => x.p) : tous.sort((a, b) => (a.codeRapport || '').localeCompare(b.codeRapport || '') || String(a.description).localeCompare(String(b.description), 'fr')));
+  $('pmCompteur').innerHTML = '<b>' + tous.length + '</b> produit(s) en stock sans prix d\'achat';
+  const saisis = new Map([...ul.querySelectorAll('[data-pm]')].map(i => [i.dataset.pm, i.value]));
+  ul.innerHTML = l.length ? l.map(p => '<li><div class="desc"><div class="nom">' + esc(p.description) + '</div><div class="sous">' + esc(p.code) + ' · ' + esc(libCategorie(p.codeRapport || '0000')) + ' · stock ' + fmtQte(p.stock) + '</div></div>' +
+    '<div class="droite" style="display:flex;gap:4px;align-items:center"><input type="text" inputmode="decimal" data-pm="' + esc(p.code) + '" placeholder="PU HT" style="width:84px;padding:6px 8px" value="' + esc(saisis.get(p.code) || '') + '">' +
+    '<button class="btn petit" data-pmok="' + esc(p.code) + '">OK</button></div></li>').join('')
+    : '<li class="groupe">' + (tous.length ? 'Aucun produit pour ce filtre.' : '🎉 Tous les produits en stock ont un prix d\'achat.') + '</li>';
+}
+function validerPrixManquant(inp) {
+  if (!inp) return;
+  const pu = lireNombre(inp.value);
+  if (pu == null || pu <= 0) { toast('Prix unitaire HT ?', 'warn'); inp.focus(); return; }
+  const code = inp.dataset.pm;
+  const tous = [...document.querySelectorAll('#pmListe [data-pm]')];
+  const suivant = tous[tous.indexOf(inp) + 1];
+  const codeSuivant = suivant ? suivant.dataset.pm : null;
+  if (enregistrerPrixSeul(code, arrondi(pu, 4), '') === false) return;
+  // la ligne disparaît dès que le catalogue est à jour : on se place sur la suivante
+  setTimeout(() => {
+    renderPrixManquants();
+    const n = codeSuivant && document.querySelector('[data-pm="' + codeSuivant + '"]');
+    if (n) n.focus();
+  }, 150);
+}
+// ============================================================
 //  CATALOGUE
 // ============================================================
 // Codes rapport présents : catégories connues + codes portés par des produits, dans l'ordre des codes
@@ -3999,7 +4312,7 @@ function renderCatalogue() {
     .filter(p => filtreCategorie === 'tous' || (p.codeRapport || '0000') === filtreCategorie)
     .filter(filtre)
     .filter(p => !q || (estCodeRapport ? (p.codeRapport || '0000') === q
-      : normaliserTexte(p.description).includes(q) || String(p.code).includes(q)))
+      : String(p.code).includes(q) || correspond(p, brut)))
     .sort((a, b) => String(a.description).localeCompare(String(b.description), 'fr', { sensitivity: 'base' }));
 
   const enStock = liste.filter(p => (p.stock || 0) > 0).length;
@@ -4095,7 +4408,8 @@ function renderInventaire() {
   if (sansPrix.length) {
     html += '<div class="alerte">' + sansPrix.length + ' produit(s) en stock sans prix d\'achat : leur valeur compte pour 0 €.<ul>' +
       sansPrix.slice(0, 15).map(p => '<li>' + esc(p.description) + ' (' + fmtQte(p.stock) + ')</li>').join('') +
-      (sansPrix.length > 15 ? '<li>…</li>' : '') + '</ul></div>';
+      (sansPrix.length > 15 ? '<li>…</li>' : '') + '</ul>' +
+      (ia ? '' : '<button class="btn petit no-print" id="iPrixManquants" style="margin-top:6px">Encoder les prix d\'achat manquants</button>') + '</div>';
   }
   if (negatifs.length) {
     html += '<div class="alerte">' + negatifs.length + ' produit(s) à stock négatif : faites un comptage.<ul>' +
@@ -4125,6 +4439,7 @@ function renderInventaire() {
   html += '</tbody></table></div>';
   html += '<div class="signature"><div>Établi par : ……………………………………</div><div>Date et signature : ……………………………………</div></div>';
   $('iReleve').innerHTML = html;
+  if ($('iPrixManquants')) $('iPrixManquants').onclick = ouvrirPrixManquants;
 }
 // « Tabac (4000) » : nom suivi du code rapport entre parenthèses
 function libCategorie(c) {
@@ -4790,6 +5105,7 @@ function guideHTML() {
   '<li>Produit connu : sa fiche s\'ouvre. Produit inconnu : la fiche « Nouveau produit » s\'ouvre.</li></ol>' +
   '<div class="astuce">Les articles sans code-barres (bonbonnes de gaz, cautions, caisse Jupiler…) ont un numéro interne de 5 ou 6 chiffres : tapez-le dans le champ, ou cherchez-les par leur nom dans le Catalogue.</div>' +
   '<p>« Code mal lu » : le code n\'est pas valide, rescannez.</p>' +
+  '<p><b>Chercher par nom</b> (produit sans code-barres, ou plus rapide) : tapez dans « Ou chercher par nom ». Les produits sont proposés au fil de la frappe : majuscules et accents ne comptent pas, les mots peuvent être dans n\'importe quel ordre, un début de mot suffit (« jup cas » → Jupiler casier) et les petites fautes sont tolérées (« chokomel » → Chocomel). Touchez le bon produit (ou Entrée pour le premier). S\'il n\'existe pas : <b>+ Créer le produit « … »</b>, le nom est déjà rempli.</p>' +
   '<p>Si plusieurs codes-barres sont visibles (produit voisin, carton), l\'appli prend <b>celui qui est au centre du cadre</b> : visez bien le code du produit.</p>' +
   '<p>Les grands codes des cartons (GS1) sont aussi reconnus : ils donnent le code du carton et, souvent, sa date de péremption, qui est alors proposée dans l\'entrée.</p></details>' +
 
@@ -4803,7 +5119,8 @@ function guideHTML() {
   '<p>Le code-barres lu s\'affiche en grand en haut de « Nouveau produit ». <b>Vérifiez-le</b> avec l\'emballage. Si ce n\'est pas le bon : <b>Ce n\'est pas le bon code ?</b> → tapez le bon code, ou « Rescanner avec la caméra ».</p>' +
   '<p><b>Produit déjà créé avec un mauvais code</b> : fiche → Infos produit → <b>Corriger le code-barres…</b>. Tapez ou scannez le bon code. Le stock, le prix d\'achat, les infos, les dates de péremption et l\'historique passent sur le bon code. Cochez « Garder aussi l\'ancien code » si la caisse ou les factures utilisent encore l\'ancien ; décochez-la s\'il était faux.</p>' +
   '<p>Si l\'autre téléphone vient de créer le même produit, vous voyez « Déjà créé par … » et sa fiche s\'ouvre : rien n\'est créé en double.</p>' +
-  '<p>Produit sans code-barres : bouton <b>Produit sans code-barres</b> dans Scanner, un numéro interne est attribué.</p></details>' +
+  '<p>Produit sans code-barres : bouton <b>Produit sans code-barres</b> dans Scanner (ou « + Créer le produit » de la recherche par nom). Le champ <b>Code-barres (facultatif)</b> permet de taper ou scanner son code ; laissé vide, un numéro interne est attribué.</p>' +
+  '<p>Pendant la frappe de la désignation, des <b>mots déjà utilisés</b> dans le catalogue sont proposés (« marl » → Marlboro) : touchez-en un pour le compléter. Les noms restent homogènes et les doublons plus faciles à repérer.</p></details>' +
 
   '<details><summary>4. Encoder une livraison (entrée)</summary>' +
   '<ol><li>Scannez le produit (ou ouvrez-le depuis le Catalogue).</li>' +
@@ -4812,6 +5129,10 @@ function guideHTML() {
   '<li>Vérifiez le total HT affiché avec la facture, puis <b>Ajouter l\'entrée</b>.</li></ol>' +
   '<p>L\'appli demande confirmation si le produit a déjà été encodé aujourd\'hui, ou si le prix s\'écarte de plus de 50 % du précédent (faute de frappe ?).</p>' +
   '<div class="astuce">Hors ligne (réserve, chambre froide), l\'entrée est gardée dans le téléphone et envoyée dès le retour du réseau.</div></details>' +
+
+  '<details><summary>4 bis. Prix d\'achat seul (sans changer le stock)</summary>' +
+  '<p>Pour le stock déjà en rayon (comptage de départ), le prix d\'achat est encore inconnu. Fiche du produit → <b>Prix d\'achat HT seul</b> (ouvert d\'office si le prix manque) : prix unitaire HT, ou prix du carton et nombre d\'unités, et le fournisseur. Seul le prix change, pas la quantité. Il apparaît dans l\'historique et peut être annulé.</p>' +
+  '<p>Pour en faire beaucoup à la suite : onglet Inventaire → <b>Encoder les prix d\'achat manquants</b> (rubrique 9).</p></details>' +
 
   '<details><summary>5. Compter et corriger le stock</summary>' +
   '<p><b>Un seul produit</b> : dans sa fiche, partie <b>Comptage</b>, tapez la quantité réellement présente (rayon + réserve) puis <b>Corriger le stock</b>. L\'écart est enregistré dans l\'historique.</p>' +
@@ -4861,7 +5182,7 @@ function guideHTML() {
   '<p>L\'onglet <b>Inventaire</b> calcule à tout moment la valeur du stock : quantité × dernier prix d\'achat HT, avec la répartition par taux de TVA et le détail par catégorie.</p>' +
   '<ul><li><b>Imprimer / PDF</b> : relevé avec en-tête de la société et lignes de signature.</li>' +
   '<li><b>Exporter (CSV)</b> : pour Excel ou le comptable.</li>' +
-  '<li>Les produits en stock <b>sans prix d\'achat</b> comptent pour 0 € et sont signalés : encodez une entrée pour leur donner un prix.</li>' +
+  '<li>Les produits en stock <b>sans prix d\'achat</b> comptent pour 0 € et sont signalés. Bouton <b>Encoder les prix d\'achat manquants</b> : la liste de ces produits avec une case prix par ligne ; tapez le prix unitaire HT puis Entrée, l\'appli passe au suivant. Le stock ne change pas.</li>' +
   '<li>Le tableau <b>Sorties de stock</b> de l\'année (périmés, casse, consommation interne, vol…) donne les unités et la valeur HT par motif.</li>' +
   '<li>En haut de l\'onglet : la carte <b>Inventaire rapide</b> pour compter le shop (voir rubrique 5). Elle n\'est pas imprimée.</li></ul>' +
   '<p><b>Inventaire arrêté (clôture annuelle)</b> : carte « Inventaire arrêté » de l\'onglet Inventaire.</p><ol>' +
