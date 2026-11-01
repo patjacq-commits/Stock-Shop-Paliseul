@@ -25,7 +25,7 @@ button,input,select{font:inherit}
 .pastille{width:9px;height:9px;border-radius:50%;background:#7bd389;flex:none}
 .pastille.horsligne{background:#ff8a65}
 nav{display:flex;background:#fff;border-bottom:1px solid var(--bord)}
-nav button{flex:1;border:0;background:none;padding:11px 1px;color:var(--gris);font-weight:600;font-size:13px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+nav button{flex:1;border:0;background:none;padding:11px 1px;color:var(--gris);font-weight:600;font-size:12px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
 .nb-onglet{display:inline-block;background:var(--rouge);color:#fff;border-radius:9px;font-size:11px;min-width:18px;padding:0 5px;line-height:18px}
 .bandeau{display:flex;align-items:center;gap:8px;border-radius:12px;padding:10px 12px;margin-bottom:14px;font-size:14px}
 .bandeau span{flex:1}
@@ -187,6 +187,13 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 .guide ul,.guide ol{padding-left:20px;margin:6px 0 10px}
 .guide .astuce{background:#eef3fa;border-radius:8px;padding:8px 10px;font-size:14px;margin:8px 0 10px}
 .guide-impr{display:none}
+.st-titre{font-size:15px;margin:18px 0 6px}
+.barre-mois{height:10px;background:var(--bleu);border-radius:3px;min-width:2px}
+.barre-mois.neg{background:var(--rouge)}
+#stContenu input.commission{width:78px;padding:4px 6px;font-size:13px;text-align:right}
+#stContenu tr[data-code]{cursor:pointer}
+.chiffres div span+b+span{font-size:12px;color:var(--gris)}
+#fMarge{margin:6px 0 2px;font-size:13.5px}
 .deballe{border-top:1px solid #edf0f3;padding:8px 0 4px}
 .deballe:first-of-type{border-top:0}
 #cpListe li{cursor:pointer}
@@ -213,6 +220,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 
 /* Impression du relevé d'inventaire */
 @media print{
+  #stContenu input.commission{border:0;padding:0;background:none}
   @page{size:A4;margin:14mm 12mm}
   body{background:#fff;font-size:12px}
   #entete,.no-print,#toast,#fond{display:none!important}
@@ -277,6 +285,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
       <button data-onglet="catalogue">Catalogue</button>
       <button data-onglet="peremption">Péremption <span class="nb-onglet cache" id="nbPer"></span></button>
       <button data-onglet="inventaire">Inventaire</button>
+      <button data-onglet="stats">Stats</button>
       <button data-onglet="outils">Outils</button>
     </nav>
   </div>
@@ -359,6 +368,25 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
       <div class="carte" id="iReleve"></div>
     </section>
 
+    <!-- Onglet Stats -->
+    <section id="ongletStats" class="cache">
+      <div class="carte no-print">
+        <div class="deux">
+          <select id="stType" aria-label="Période"><option value="mois">Mois</option><option value="annee">Année</option><option value="libre">Dates libres</option></select>
+          <select id="stValeur" aria-label="Choix"></select>
+        </div>
+        <div class="deux cache" id="stLibre" style="margin-top:8px">
+          <div><label for="stDu">Du</label><input type="date" id="stDu"></div>
+          <div><label for="stAu">Au</label><input type="date" id="stAu"></div>
+        </div>
+        <div class="deux" style="margin-top:8px">
+          <button class="btn" id="stImprimer">🖨 Imprimer / PDF</button>
+          <button class="btn second" id="stExporter">Exporter (CSV)</button>
+        </div>
+      </div>
+      <div class="carte" id="stContenu"></div>
+    </section>
+
     <!-- Onglet Outils -->
     <section id="ongletOutils" class="cache">
       <div class="carte">
@@ -381,8 +409,12 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
         <input type="text" id="vIgnCodes" autocomplete="off">
         <label for="vIgnPlu">PLU non suivis</label>
         <input type="text" id="vIgnPlu" autocomplete="off">
+        <div class="deux">
+          <div><label for="vCafe">PLU café à emporter</label><input type="text" id="vCafe" autocomplete="off"></div>
+          <div><label for="vLoto">Codes rapport loterie</label><input type="text" id="vLoto" autocomplete="off"></div>
+        </div>
         <button class="btn second plein" id="vIgnOk" style="margin-top:10px">Enregistrer</button>
-        <p class="aide">Ces lignes ne modifient pas le stock (carburant, loterie, cautions, café…). Séparez par des virgules.</p>
+        <p class="aide">Ces lignes ne modifient pas le stock (carburant, loterie, cautions, café…). Séparez par des virgules. Le café et la loterie sont quand même comptés dans les statistiques (hors stock).</p>
       </div>
       <div class="carte">
         <h2>Importer un catalogue (CSV)</h2>
@@ -480,11 +512,18 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.6.3';
+const VERSION = 'v0.7.0';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.7.0', date: '01/11/2026', points: [
+    'Nouvel onglet Stats : ventes, marge et bénéfice brut du shop par mois, par année ou entre deux dates ; détail par code rapport ; meilleures ventes ; produits sans vente.',
+    'Bénéfice brut par mois : marge sur ventes + gain café + commission loterie − sorties (périmés, casse…).',
+    'Café à emporter et loterie enregistrés à l\'import des shifts (hors stock). Fournitures café des factures déduites du gain café.',
+    'Marge dans chaque fiche produit, objectif de marge par code rapport (Outils → Catégories), prix conseillé et alerte « marge faible ».',
+    'Prix imposés (tabac, cautions, cartes téléphone, sacs PMC…) : pas de prix conseillé.'
+  ] },
   { v: 'v0.6.3', date: '01/11/2026', points: [
     'Packs : Jupiler 6x33cl, Jupiler 6X50cl et Desperados 4x50cl sont reliés à leur canette (6 ou 4 pièces).',
     'Bouton « Déballer » dans la fiche du pack (et de la canette) : les packs ouverts sont retirés et les canettes ajoutées, comme la conversion dans Tokheim. Annulable.',
@@ -622,11 +661,11 @@ const CATEGORIES_DEFAUT = {
   '2119': { nom: 'Accessoires auto', court: 'Auto', tva: 21 },
   '3006': { nom: 'Alimentation / snacks', court: 'Alim.', tva: 6, peremption: true },
   '3506': { nom: 'Glaces', court: 'Glaces', tva: 6, peremption: true },
-  '4000': { nom: 'Tabac', court: 'Tabac', tva: 0 },
+  '4000': { nom: 'Tabac', court: 'Tabac', tva: 0, prixImpose: true },
   '4019': { nom: 'Accessoires fumeur', court: 'Fumeur', tva: 21 },
   '6019': { nom: 'Droguerie / divers', court: 'Droguerie', tva: 21 },
   '7019': { nom: 'Bières, vins, alcools', court: 'Alcools', tva: 21, peremption: true },
-  '7100': { nom: 'Cautions / consignes', court: 'Cautions', tva: 0 },
+  '7100': { nom: 'Cautions / consignes', court: 'Cautions', tva: 0, prixImpose: true },
   '7119': { nom: 'Boissons sans alcool', court: 'Boissons', tva: 6, peremption: true },
   '0000': { nom: 'Autre', court: 'Autre', tva: 21 }
 };
@@ -815,6 +854,7 @@ function demarrer() {
       arreterSortiesEtAlias();
       arreterComptages();
       arreterInventaires();
+      arreterStatsMois();
       afficherConnexion('');
     }
   });
@@ -855,6 +895,7 @@ function afficherAppli() {
   ecouterSortiesEtAlias();
   ecouterComptages();
   ecouterInventaires();
+  ecouterStatsMois();
   afficherNouveautesSiBesoin();
 }
 
@@ -875,12 +916,15 @@ function reconstruireCategories() {
       nom: v.nom || ('Code ' + c),
       court: v.court || c,
       tva: v.tva != null ? v.tva : 21,
-      peremption: v.peremption != null ? v.peremption : !!(CATEGORIES_DEFAUT[c] && CATEGORIES_DEFAUT[c].peremption)
+      peremption: v.peremption != null ? v.peremption : !!(CATEGORIES_DEFAUT[c] && CATEGORIES_DEFAUT[c].peremption),
+      prixImpose: v.prixImpose != null ? v.prixImpose : !!(CATEGORIES_DEFAUT[c] && CATEGORIES_DEFAUT[c].prixImpose),
+      margeCible: v.margeCible != null ? v.margeCible : null
     };
   });
   renderCatalogue();
   renderInventaire();
   renderCategoriesOutils();
+  renderStats();
 }
 
 function ecouterRemises() {
@@ -961,7 +1005,7 @@ $('cOubli').addEventListener('click', async () => {
 // ============================================================
 //  ONGLETS
 // ============================================================
-const ONGLETS = { scanner: 'ongletScanner', catalogue: 'ongletCatalogue', peremption: 'ongletPeremption', inventaire: 'ongletInventaire', outils: 'ongletOutils' };
+const ONGLETS = { scanner: 'ongletScanner', catalogue: 'ongletCatalogue', peremption: 'ongletPeremption', inventaire: 'ongletInventaire', stats: 'ongletStats', outils: 'ongletOutils' };
 function allerOnglet(nom) { document.querySelector('nav [data-onglet="' + nom + '"]').click(); }
 document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('actif', x === b));
@@ -969,6 +1013,7 @@ document.querySelectorAll('nav button').forEach(b => b.addEventListener('click',
   Object.entries(ONGLETS).forEach(([nom, id]) => $(id).classList.toggle('cache', nom !== o));
   if (o !== 'scanner') arreterCamera();
   if (o === 'inventaire') renderInventaire();
+  if (o === 'stats') renderStats();
   window.scrollTo(0, 0);
 }));
 
@@ -1192,6 +1237,12 @@ function champsProduit(p) {
       '<option value=""' + (p.suiviPeremption == null ? ' selected' : '') + '>Selon la catégorie</option>' +
       '<option value="oui"' + (p.suiviPeremption === true ? ' selected' : '') + '>Suivies pour ce produit</option>' +
       '<option value="non"' + (p.suiviPeremption === false ? ' selected' : '') + '>Non suivies pour ce produit</option>' +
+    '</select>' +
+    '<label for="fImpose">Prix de vente imposé</label>' +
+    '<select id="fImpose">' +
+      '<option value=""' + (p.prixImpose == null ? ' selected' : '') + '>Selon la catégorie</option>' +
+      '<option value="oui"' + (p.prixImpose === true ? ' selected' : '') + '>Oui (tabac, carte téléphone, sac PMC…)</option>' +
+      '<option value="non"' + (p.prixImpose === false ? ' selected' : '') + '>Non</option>' +
     '</select>';
 }
 
@@ -1276,6 +1327,7 @@ async function ouvrirFiche(mode, p) {
     p.archive ? '<div class="alerte">Ce produit est <b>retiré du catalogue</b>' + (p.archivePar ? ' (par ' + esc(p.archivePar) + (p.archiveLe ? ' le ' + dateTexte(p.archiveLe) : '') + ')' : '') +
       '. <button class="btn petit" id="frReactiver">Réactiver</button></div>' : '') +
     '<div class="resume" id="fResume"></div>' +
+    '<div class="aide" id="fMarge"></div>' +
     blocPrixSeul(p) +
     blocEntree(p) +
     (suiviPeremption(p) || lotsActifs.some(l => l.code === p.code) ? blocPeremption(p) : '') +
@@ -1357,6 +1409,7 @@ function majResumeFiche() {
     '<div><span>Stock</span><b>' + fmtQte(st) + '</b></div>' +
     '<div><span>Dernier prix HT</span><b>' + fmtPU(pa) + '</b></div>' +
     '<div><span>Valeur HT</span><b>' + (pa != null && st > 0 ? euro(st * pa) : '—') + '</b></div>';
+  if ($('fMarge')) $('fMarge').innerHTML = texteMarge(p);
 }
 
 function majSemblables() {
@@ -1379,7 +1432,8 @@ async function enregistrerFiche() {
     tvaPct: Number($('fTva').value),
     prixVenteTTC: lireNombre($('fPrix').value),
     consigne: lireNombre($('fConsigne').value),
-    suiviPeremption: $('fSuivi').value === '' ? null : $('fSuivi').value === 'oui'
+    suiviPeremption: $('fSuivi').value === '' ? null : $('fSuivi').value === 'oui',
+    prixImpose: $('fImpose').value === '' ? null : $('fImpose').value === 'oui'
   };
   let { mode, code } = ficheCourante;
   // Nouveau produit sans code scanné : code-barres tapé dans le champ facultatif
@@ -2019,7 +2073,7 @@ function actionLot(id, action) {
 //            (une ligne « vente » par article, une ligne « controle » par code rapport)
 // ============================================================
 let mvEnAttente = null;
-let reglagesVentes = { codesIgnores: ['1519', '1619', '9500', '7100'], pluIgnores: ['75369'] };
+let reglagesVentes = { codesIgnores: ['1519', '1619', '9500', '7100'], pluIgnores: ['75369'], pluCafe: ['75369'], codesLoterie: ['9500'] };
 let desabonnerVentesParam = null, desabonnerFactures = null, desabonnerShifts = null;
 let facturesRecentes = [], shiftsRecents = [];
 
@@ -2031,6 +2085,10 @@ function ecouterImports() {
     const d = (s.exists && s.data()) || {};
     if (Array.isArray(d.codesIgnores)) reglagesVentes.codesIgnores = d.codesIgnores;
     if (Array.isArray(d.pluIgnores)) reglagesVentes.pluIgnores = d.pluIgnores;
+    if (Array.isArray(d.pluCafe)) reglagesVentes.pluCafe = d.pluCafe;
+    if (Array.isArray(d.codesLoterie)) reglagesVentes.codesLoterie = d.codesLoterie;
+    $('vCafe').value = reglagesVentes.pluCafe.join(', ');
+    $('vLoto').value = reglagesVentes.codesLoterie.join(', ');
     $('vIgnCodes').value = reglagesVentes.codesIgnores.join(', ');
     $('vIgnPlu').value = reglagesVentes.pluIgnores.join(', ');
   }, err => console.warn('Réglages ventes', err.code));
@@ -2040,6 +2098,7 @@ function ecouterImports() {
     snap.forEach(d => facturesRecentes.push(Object.assign({ id: d.id, genre: 'facture' }, d.data({ serverTimestamps: 'estimate' }))));
     renderImportsRecents();
     renderHistoriqueImports();
+    renderStats();
   }, err => console.warn('Factures', err.code));
   if (desabonnerShifts) desabonnerShifts();
   desabonnerShifts = db.collection('shifts').onSnapshot(snap => {
@@ -2047,6 +2106,7 @@ function ecouterImports() {
     snap.forEach(d => shiftsRecents.push(Object.assign({ id: d.id, genre: 'shift' }, d.data({ serverTimestamps: 'estimate' }))));
     renderImportsRecents();
     renderHistoriqueImports();
+    renderStats();
   }, err => console.warn('Shifts', err.code));
 }
 function arreterImports() {
@@ -2057,7 +2117,8 @@ function arreterImports() {
 $('vIgnOk').addEventListener('click', () => {
   const liste = v => v.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
   db.collection('parametres').doc('ventes').set({
-    codesIgnores: liste($('vIgnCodes').value), pluIgnores: liste($('vIgnPlu').value), modifiePar: utilisateur
+    codesIgnores: liste($('vIgnCodes').value), pluIgnores: liste($('vIgnPlu').value),
+    pluCafe: liste($('vCafe').value), codesLoterie: liste($('vLoto').value), modifiePar: utilisateur
   }).catch(e => toast('Enregistrement refusé : ' + e.code, 'ko'));
   toast('Réglages des ventes enregistrés');
 });
@@ -2084,7 +2145,7 @@ $('mvAnalyser').addEventListener('click', async () => {
     const lignes = lignesObjets(await lireFichierTableau(f));
     if (!lignes.length) throw new Error('fichier vide ou colonne « type » absente.');
     const types = new Set(lignes.map(l => l.type.toLowerCase()));
-    if (types.has('achat')) mvEnAttente = await analyserFacture(lignes);
+    if (types.has('achat') || types.has('cafe')) mvEnAttente = await analyserFacture(lignes);
     else if (types.has('vente')) mvEnAttente = await analyserVentes(lignes);
     else throw new Error('ce fichier ne contient ni lignes « achat » (facture) ni lignes « vente » (shift).');
     mvEnAttente.fichier = f.name;
@@ -2135,9 +2196,12 @@ function ligneControle(libelle, attendu, calcule) {
 // ---------- FACTURE ----------
 async function analyserFacture(lignes) {
   const achats = lignes.filter(l => l.type.toLowerCase() === 'achat');
+  // Fournitures café (café, gobelets, couvercles, sucre…) : hors stock, déduites du gain café
+  const cafes = lignes.filter(l => l.type.toLowerCase() === 'cafe');
+  const entete = achats[0] || cafes[0];
   const total = lignes.find(l => l.type.toLowerCase() === 'total');
-  const fournisseur = achats[0].fournisseur || '';
-  const numero = achats[0].numero || '';
+  const fournisseur = entete.fournisseur || '';
+  const numero = entete.numero || '';
   if (!fournisseur || !numero) throw new Error('fournisseur ou numéro de facture manquant.');
   const id = cleDoc(fournisseur) + '__' + cleDoc(numero);
   const deja = await db.collection('factures').doc(id).get();
@@ -2147,7 +2211,13 @@ async function analyserFacture(lignes) {
   const corr = new Map();
   (await db.collection('correspondances').where('fournisseur', '==', cleDoc(fournisseur)).get()).forEach(d => corr.set(d.data().ref, d.data().code));
 
-  const plan = { genre: 'facture', id, fournisseur, numero, date: achats[0].date || '', lignes: [], controles: [] };
+  const plan = { genre: 'facture', id, fournisseur, numero, date: entete.date || '', lignes: [], controles: [], charges: [] };
+  cafes.forEach(l => {
+    const q = lireNombreImport(l.quantite), pu = lireNombreImport(l.prixunitaireht);
+    let m = lireNombreImport(l.montantht);
+    if (m == null && q != null && pu != null) m = arrondi(q * pu, 2);
+    plan.charges.push({ description: l.description || 'Fournitures café', quantite: q, montant: m || 0 });
+  });
   achats.forEach(l => {
     // Tout est compté à la pièce : « colis » × « unites_par_colis » (farde, carton…) donne la quantité en pièces
     let q = lireNombreImport(l.quantite), pu = lireNombreImport(l.prixunitaireht);
@@ -2182,7 +2252,7 @@ async function analyserFacture(lignes) {
       erreur: !q || q <= 0 ? 'quantité manquante' : (pu == null ? 'prix manquant' : '')
     });
   });
-  const somme = arrondi(plan.lignes.reduce((s, x) => s + (x.montant || 0), 0), 2);
+  const somme = arrondi(plan.lignes.reduce((s, x) => s + (x.montant || 0), 0) + plan.charges.reduce((s, x) => s + x.montant, 0), 2);
   if (total) {
     const c = ligneControle('Total HT de la facture' + (total.remarque ? ' (' + total.remarque + ')' : ''), lireNombreImport(total.montantht), somme);
     plan.controles.push(c);
@@ -2190,7 +2260,7 @@ async function analyserFacture(lignes) {
   plan.lignes.forEach(x => {
     if (x.quantite && x.pu != null && Math.abs(x.quantite * x.pu - x.montant) > 0.05) plan.controles.push(ligneControle('Ligne ' + x.ligne + ' ' + x.description + ' (quantité × prix)', x.montant, arrondi(x.quantite * x.pu, 2)));
   });
-  plan.lignes.forEach(x => { x.alerte = alertePrixLigne(x); });
+  plan.lignes.forEach(x => { x.alerte = alertePrixLigne(x); x.infoMarge = infoMargeLigne(x); });
   plan.controleOk = plan.controles.every(c => c.ok) && plan.lignes.every(x => !x.erreur);
   plan.total = somme;
   return plan;
@@ -2215,18 +2285,23 @@ function afficherApercuMv() {
         (x.remarque ? '<br><span class="aide">⚠️ ' + esc(x.remarque) + '</span>' : '') +
         (x.erreur ? '<br><span class="sansprix">' + esc(x.erreur) + '</span>' : '') +
         '<br><span class="aide">Pièces par colis : <input type="text" class="upcLigne" inputmode="numeric" data-i="' + i + '" value="' + esc(x.upc || 1) + '"></span>' +
-        '<br><span class="alerte-prix" id="mvW' + i + '">' + (x.alerte ? '⚠️ ' + esc(x.alerte) : '') + '</span></td>' +
+        '<br><span class="alerte-prix" id="mvW' + i + '">' + (x.alerte ? '⚠️ ' + esc(x.alerte) : '') + '</span>' +
+        '<br><span class="alerte-prix" id="mvM' + i + '">' + (x.infoMarge ? '📉 ' + esc(x.infoMarge) : '') + '</span></td>' +
         '<td class="n" id="mvQ' + i + '">' + qteLigneFacture(x) + '</td><td class="n" id="mvP' + i + '">' + fmtPU(x.pu) + '</td><td>' + (x.per ? dateLot(x.per) : '—') + '</td></tr>').join('') +
       '</tbody></table></div>';
     h += '<p class="aide">Pour un produit nouveau, scannez ou tapez son code-barres s\'il en a un : sinon un numéro interne lui est attribué. ' +
       'Tout est compté à la pièce : si une ligne est en fardes ou en cartons, mettez le nombre de pièces par colis (la quantité est multipliée, le prix divisé).</p>';
+    if (p.charges.length) h += '<div class="apercu">☕ Fournitures café (hors stock, déduites du gain café) : ' + p.charges.map(c => esc(c.description) + ' ' + euro(c.montant)).join(' · ') + '</div>';
+    const nbMarge = p.lignes.filter(x => x.infoMarge).length;
+    if (nbMarge) h += '<div class="alerte">📉 ' + nbMarge + ' produit(s) dont la marge devient faible avec ce prix d\'achat : pensez à revoir leur prix de vente (prix conseillé indiqué).</div>';
     const nbAl = p.lignes.filter(x => x.alerte).length;
     if (nbAl) h += '<div class="alerte">⚠️ ' + nbAl + ' ligne(s) avec un prix inhabituel : vérifiez les pièces par colis.</div>';
   } else {
     h += '<div class="apercu"><b>' + p.shifts.length + ' shift(s)</b> · ' + p.ventes.length + ' vente(s) déduite(s) du stock · ' +
       p.ignorees + ' ligne(s) ignorée(s) (codes non suivis) · ' + p.inconnues.length + ' PLU inconnu(s)</div>';
     p.shifts.forEach(s => {
-      h += '<h3 style="font-size:15px;margin:12px 0 4px">Shift ' + esc(s.numero) + (s.date ? ' · ' + esc(s.date) : '') + ' — ' + s.nb + ' article(s), ' + fmtQte(s.unites) + ' unité(s)</h3>';
+      h += '<h3 style="font-size:15px;margin:12px 0 4px">Shift ' + esc(s.numero) + (s.date ? ' · ' + esc(s.date) : '') + ' — ' + s.nb + ' article(s), ' + fmtQte(s.unites) + ' unité(s)</h3>' +
+        ((s.cafeQte || s.loterieTTC) ? '<p class="aide" style="margin:0">Hors stock : ☕ ' + fmtQte(s.cafeQte) + ' café(s), ' + euro(arrondi(s.cafeTTC, 2)) + ' · 🎟 loterie (solde) ' + euro(arrondi(s.loterieTTC, 2)) + '</p>' : '');
     });
     if (p.inconnues.length) h += '<div class="alerte">PLU inconnus (ignorés) :<ul>' + p.inconnues.map(x => '<li>' + esc(x.plu) + ' ' + esc(x.description) + ' (' + esc(x.coderapport) + ') × ' + esc(x.quantite) + '</li>').join('') + '</ul>Créez ces produits dans le catalogue s\'ils doivent être suivis, puis réimportez.</div>';
   }
@@ -2273,6 +2348,8 @@ function changerUpcLigne(p, i, valeur) {
   $('mvQ' + i).innerHTML = qteLigneFacture(x);
   $('mvP' + i).textContent = fmtPU(x.pu);
   $('mvW' + i).textContent = x.alerte ? '⚠️ ' + x.alerte : '';
+  x.infoMarge = infoMargeLigne(x);
+  $('mvM' + i).textContent = x.infoMarge ? '📉 ' + x.infoMarge : '';
 }
 
 async function executerFacture(p) {
@@ -2333,6 +2410,7 @@ async function executerFacture(p) {
   }
   lot.set(refFacture, {
     fournisseur: p.fournisseur, numero: p.numero, date: p.date, lignes: p.lignes.length, totalHT: p.total,
+    chargesCafeHT: arrondi(p.charges.reduce((s, x) => s + x.montant, 0), 2), chargesCafe: p.charges,
     par: utilisateur, le: maintenant, annulee: false
   });
   ops++;
@@ -2347,18 +2425,24 @@ async function analyserVentes(lignes) {
   const ventes = lignes.filter(l => l.type.toLowerCase() === 'vente');
   const controles = lignes.filter(l => l.type.toLowerCase() === 'controle');
   const codesIgn = new Set(reglagesVentes.codesIgnores), pluIgn = new Set(reglagesVentes.pluIgnores);
-  const plan = { genre: 'ventes', shifts: [], ventes: [], inconnues: [], ignorees: 0, controles: [] };
+  const plan = { genre: 'ventes', shifts: [], ventes: [], inconnues: [], ignorees: 0, horsStock: 0, controles: [] };
   const parShift = new Map();
   ventes.forEach(l => {
     if (!l.shift) throw new Error('numéro de shift manquant (ligne ' + l._ligne + ').');
-    if (!parShift.has(l.shift)) parShift.set(l.shift, { numero: l.shift, date: l.date || '', nb: 0, unites: 0, montant: 0, montantParCode: {} });
+    if (!parShift.has(l.shift)) parShift.set(l.shift, { numero: l.shift, date: l.date || '', nb: 0, unites: 0, montant: 0, montantParCode: {}, cafeQte: 0, cafeTTC: 0, cafeTva: 6, loterieTTC: 0 });
     const s = parShift.get(l.shift);
     const montant = lireNombreImport(l.montant) || 0;
     const cr = (l.coderapport || '').replace(/[.,]0+$/, '');
     s.montantParCode[cr] = (s.montantParCode[cr] || 0) + montant;
     const q = lireNombreImport(l.quantite) || 0;
     const n = lireCodeImport(l.plu);
-    if (codesIgn.has(cr) || pluIgn.has(String(l.plu).replace(/^0+/, '')) || pluIgn.has(l.plu)) { plan.ignorees++; return; }
+    // Hors stock mais comptés dans les statistiques : café à emporter, loterie
+    const pluN = String(l.plu || '').replace(/^0+/, '');
+    if (reglagesVentes.pluCafe.some(x => x === l.plu || x.replace(/^0+/, '') === pluN)) {
+      s.cafeQte += q; s.cafeTTC += montant; s.cafeTva = CATEGORIES[cr] ? CATEGORIES[cr].tva : 6; plan.horsStock++; return;
+    }
+    if (reglagesVentes.codesLoterie.includes(cr)) { s.loterieTTC += montant; plan.horsStock++; return; }
+    if (codesIgn.has(cr) || pluIgn.has(pluN) || pluIgn.has(l.plu)) { plan.ignorees++; return; }
     const code = n.ok ? trouverCode(n.code) : null;
     if (!code) { plan.inconnues.push(l); return; }
     plan.ventes.push({ shift: l.shift, code, quantite: q, montant });
@@ -2382,11 +2466,19 @@ async function analyserVentes(lignes) {
 async function executerVentes(p) {
   const FV = firebase.firestore.FieldValue;
   const maintenant = FV.serverTimestamp();
+  const detail = {};
   let lot = db.batch(), ops = 0;
   for (const v of p.ventes) {
     const prod = catalogue.get(v.code) || {};
+    // Prix d'achat du jour figé sur la vente : les statistiques passées ne bougent plus
+    const det = detail[v.shift] = detail[v.shift] || new Map();
+    const t = prod.tvaPct != null ? prod.tvaPct : (CATEGORIES[prod.codeRapport || '0000'] ? CATEGORIES[prod.codeRapport || '0000'].tva : 21);
+    const d = det.get(v.code) || { c: v.code, q: 0, m: 0, pa: prod.dernierPrixHT != null ? prod.dernierPrixHT : null, t, r: prod.codeRapport || '0000' };
+    d.q = arrondi(d.q + v.quantite, 3); d.m = arrondi(d.m + v.montant, 2);
+    det.set(v.code, d);
     lot.set(db.collection('mouvements').doc(), {
       type: 'vente', code: v.code, description: prod.description || '', quantite: -v.quantite, montantTTC: v.montant,
+      prixAchatHT: prod.dernierPrixHT != null ? prod.dernierPrixHT : null, tvaPct: t, codeRapport: prod.codeRapport || '0000',
       shift: v.shift, importShift: cleDoc(v.shift), par: utilisateur, le: maintenant, jour: jourLocal(), annulee: false
     });
     lot.update(db.collection('produits').doc(v.code), { stock: FV.increment(-v.quantite) });
@@ -2395,10 +2487,12 @@ async function executerVentes(p) {
   }
   p.shifts.forEach(s => lot.set(db.collection('shifts').doc(cleDoc(s.numero)), {
     numero: s.numero, date: s.date, articles: s.nb, unites: arrondi(s.unites, 3), montantTTC: arrondi(s.montant, 2),
+    detail: detail[s.numero] ? [...detail[s.numero].values()] : [],
+    cafeQte: arrondi(s.cafeQte, 3), cafeTTC: arrondi(s.cafeTTC, 2), cafeTva: s.cafeTva, loterieTTC: arrondi(s.loterieTTC, 2),
     par: utilisateur, le: maintenant, annulee: false
   }));
   await lot.commit();
-  return '✅ ' + p.shifts.length + ' shift(s) importé(s) : ' + p.ventes.length + ' vente(s) déduite(s) du stock.';
+  return '✅ ' + p.shifts.length + ' shift(s) importé(s) : ' + p.ventes.length + ' vente(s) déduite(s) du stock' + (p.horsStock ? ', ' + p.horsStock + ' ligne(s) café / loterie pour les statistiques' : '') + '.';
 }
 
 // ---------- Liste des imports et annulation ----------
@@ -4461,6 +4555,335 @@ function brancherContenuPack() {
   };
 }
 // ============================================================
+//  MARGES : prix de vente HT, marge, objectif par code rapport, prix conseillé, prix imposés
+// ============================================================
+function catDe(p) { return CATEGORIES[p.codeRapport || '0000'] || {}; }
+function prixImpose(p) {
+  if (p.prixImpose === true || p.prixImpose === false) return p.prixImpose;
+  return !!catDe(p).prixImpose;
+}
+function tvaDe(p) { return p.tvaPct != null ? p.tvaPct : (catDe(p).tva != null ? catDe(p).tva : 21); }
+// Prix de vente HT (consigne non comprise), marge et taux de marque (marge ÷ prix de vente HT)
+function margeProduit(p, paForce) {
+  if (!(p.prixVenteTTC > 0)) return null;
+  const pvHT = p.prixVenteTTC / (1 + tvaDe(p) / 100);
+  const pa = paForce != null ? paForce : p.dernierPrixHT;
+  if (pa == null) return { pvHT, pa: null };
+  const marge = pvHT - pa;
+  return { pvHT, pa, marge, taux: marge / pvHT, coef: pa > 0 ? pvHT / pa : null };
+}
+// Marge habituelle d'un code rapport : médiane des produits qui ont un prix d'achat et un prix de vente
+let cacheObservee = { cle: '', m: {} };
+function margeObservee(cr) {
+  const cle = catalogue.size + '|' + [...catalogue.values()].reduce((s, p) => s + (p.dernierPrixHT || 0) + (p.prixVenteTTC || 0), 0).toFixed(2);
+  if (cacheObservee.cle !== cle) {
+    const parCr = {};
+    catalogue.forEach(p => {
+      if (!actif(p) || prixImpose(p)) return;
+      const m = margeProduit(p);
+      if (!m || m.pa == null || m.taux < -0.5 || m.taux > 0.95) return;
+      (parCr[p.codeRapport || '0000'] = parCr[p.codeRapport || '0000'] || []).push(m.taux);
+    });
+    const res = {};
+    Object.entries(parCr).forEach(([c, l]) => {
+      if (l.length < 3) return;
+      l.sort((a, b) => a - b);
+      res[c] = l.length % 2 ? l[(l.length - 1) / 2] : (l[l.length / 2 - 1] + l[l.length / 2]) / 2;
+    });
+    cacheObservee = { cle, m: res };
+  }
+  return cacheObservee.m[cr] != null ? cacheObservee.m[cr] : null;
+}
+function margeCible(cr) {
+  const c = CATEGORIES[cr];
+  return c && c.margeCible != null ? c.margeCible / 100 : margeObservee(cr);
+}
+function prixConseille(p, paForce) {
+  if (prixImpose(p)) return null;
+  const m = margeProduit(p, paForce), cible = margeCible(p.codeRapport || '0000');
+  if (!m || m.pa == null || cible == null || cible >= 0.95) return null;
+  return Math.ceil(m.pa / (1 - cible) * (1 + tvaDe(p) / 100) * 20 - 1e-9) / 20;
+}
+function margeFaible(p, paForce) {
+  if (prixImpose(p)) return false;
+  const m = margeProduit(p, paForce), cible = margeCible(p.codeRapport || '0000');
+  return !!(m && m.pa != null && cible != null && m.taux < cible - 0.10);
+}
+const pct = x => x == null ? '—' : (Math.round(x * 1000) / 10).toString().replace('.', ',') + ' %';
+function texteMarge(p) {
+  if (!(p.prixVenteTTC > 0)) return 'Marge : prix de vente inconnu.';
+  const m = margeProduit(p);
+  if (!m || m.pa == null) return 'Marge : prix d\'achat inconnu.';
+  const imp = prixImpose(p);
+  const cible = margeCible(p.codeRapport || '0000');
+  const pc = prixConseille(p);
+  return 'Vente ' + euro(p.prixVenteTTC) + ' TTC = ' + fmtPU(m.pvHT) + ' HT · marge <b>' + fmtPU(m.marge) + '</b> (' + pct(m.taux) + ')' +
+    (imp ? ' · <span class="badge">prix imposé</span>'
+      : (cible != null ? ' · objectif ' + pct(cible) : '') +
+        (margeFaible(p) ? ' <span class="sansprix">⚠️ marge faible</span>' : '') +
+        (pc != null && Math.abs(pc - p.prixVenteTTC) >= 0.05 ? ' · prix conseillé ' + euro(pc) : ''));
+}
+// Facture : marge avec le nouveau prix d'achat
+function infoMargeLigne(x) {
+  const p = x.code && catalogue.get(x.code);
+  if (!p || x.pu == null || prixImpose(p)) return '';
+  const q = Object.assign({}, p, x.prixVente != null ? { prixVenteTTC: x.prixVente } : {});
+  if (!margeFaible(q, x.pu)) return '';
+  const m = margeProduit(q, x.pu), pc = prixConseille(q, x.pu);
+  return 'Marge ' + pct(m.taux) + ' avec ce prix d\'achat (objectif ' + pct(margeCible(p.codeRapport || '0000')) + ')' + (pc ? ' : prix conseillé ' + euro(pc) : '');
+}
+
+// ============================================================
+//  STATISTIQUES (à partir des shifts importés : aucun relevé supplémentaire)
+// ============================================================
+let statsMois = {};            // 'AAAA-MM' -> { commissionLoterie }
+let desabonnerStatsMois = null;
+let etatStats = { type: 'mois', valeur: null, du: '', au: '', cr: 'tous', tri: 'q', margeCr: 'tous' };
+
+function ecouterStatsMois() {
+  if (desabonnerStatsMois) desabonnerStatsMois();
+  desabonnerStatsMois = db.collection('statsMois').onSnapshot(snap => {
+    statsMois = {};
+    snap.forEach(d => { statsMois[d.id] = d.data(); });
+    renderStats();
+  }, err => console.warn('Stats', err.code));
+}
+function arreterStatsMois() { if (desabonnerStatsMois) desabonnerStatsMois(); desabonnerStatsMois = null; }
+
+const dateShift = s => dateISO(s.date) || jourLocal(new Date(ms(s.le) || Date.now()));
+const dateFacture = f => dateISO(f.date) || jourLocal(new Date(ms(f.le) || Date.now()));
+function bornesStats() {
+  const auj = jourLocal();
+  if (etatStats.type === 'libre') return [etatStats.du || auj.slice(0, 8) + '01', etatStats.au || auj];
+  if (etatStats.type === 'annee') { const a = etatStats.valeur || auj.slice(0, 4); return [a + '-01-01', a + '-12-31']; }
+  const m = etatStats.valeur || auj.slice(0, 7);
+  const [a, mm] = m.split('-').map(Number);
+  return [m + '-01', jourLocal(new Date(a, mm, 0))];
+}
+function moisLibelle(m) { const [a, mm] = m.split('-').map(Number); return MOIS_NOMS[mm - 1].replace(/^./, c => c.toUpperCase()) + ' ' + a; }
+
+// Tous les chiffres d'une période
+function calculerPeriode(d1, d2) {
+  const r = { ventesTTC: 0, ventesHT: 0, htAvecPA: 0, cout: 0, htSansPA: 0, nbArticles: 0, shifts: 0, sansDetail: 0,
+    parCr: {}, parProduit: new Map(), cafeQte: 0, cafeTTC: 0, cafeHT: 0, achatsCafe: 0, loterieSolde: 0, commission: 0, sorties: 0, sortiesParMotif: {}, dates: new Set() };
+  shiftsRecents.filter(s => !s.annulee).forEach(s => {
+    const d = dateShift(s);
+    if (d < d1 || d > d2) return;
+    r.shifts++; r.dates.add(d);
+    r.cafeQte += s.cafeQte || 0; r.cafeTTC += s.cafeTTC || 0; r.cafeHT += (s.cafeTTC || 0) / (1 + (s.cafeTva != null ? s.cafeTva : 6) / 100);
+    r.loterieSolde += s.loterieTTC || 0;
+    if (!Array.isArray(s.detail)) { r.sansDetail++; return; }
+    s.detail.forEach(x => {
+      const ht = x.m / (1 + (x.t || 0) / 100);
+      const cr = x.r || '0000';
+      r.ventesTTC += x.m; r.ventesHT += ht; r.nbArticles += x.q;
+      const c = r.parCr[cr] = r.parCr[cr] || { ht: 0, ttc: 0, htAvecPA: 0, cout: 0, q: 0 };
+      c.ht += ht; c.ttc += x.m; c.q += x.q;
+      const pr = r.parProduit.get(x.c) || { code: x.c, q: 0, ttc: 0, ht: 0, cout: 0, htAvecPA: 0, sansPA: false };
+      pr.q += x.q; pr.ttc += x.m; pr.ht += ht;
+      if (x.pa != null) { const co = x.q * x.pa; r.cout += co; r.htAvecPA += ht; c.cout += co; c.htAvecPA += ht; pr.cout += co; pr.htAvecPA += ht; }
+      else { r.htSansPA += ht; pr.sansPA = true; }
+      r.parProduit.set(x.c, pr);
+    });
+  });
+  facturesRecentes.filter(f => !f.annulee && f.chargesCafeHT).forEach(f => { const d = dateFacture(f); if (d >= d1 && d <= d2) r.achatsCafe += f.chargesCafeHT; });
+  Object.entries(statsMois).forEach(([m, v]) => { if (m + '-01' >= d1.slice(0, 7) + '-01' && m + '-01' <= d2) r.commission += v.commissionLoterie || 0; });
+  const ajouterSortie = (m, motif) => {
+    if (m.annulee || !m.jour || m.jour < d1 || m.jour > d2) return;
+    r.sorties += m.valeurHT || 0;
+    r.sortiesParMotif[motif] = (r.sortiesParMotif[motif] || 0) + (m.valeurHT || 0);
+  };
+  pertes.forEach(m => ajouterSortie(m, 'perime'));
+  sorties.forEach(m => ajouterSortie(m, m.motif || 'autre'));
+  r.marge = r.htAvecPA - r.cout;
+  r.gainCafe = r.cafeHT - r.achatsCafe;
+  r.benefice = r.marge + r.gainCafe + r.commission - r.sorties;
+  return r;
+}
+function joursSansShift(d1, d2, dates) {
+  const premier = shiftsRecents.filter(s => !s.annulee).map(dateShift).sort()[0];
+  if (!premier) return [];
+  const debut = d1 > premier ? d1 : premier, fin = d2 < jourLocal() ? d2 : jourLocal();
+  const l = [];
+  for (let d = new Date(debut + 'T12:00:00'); jourLocal(d) <= fin; d.setDate(d.getDate() + 1)) if (!dates.has(jourLocal(d))) l.push(jourLocal(d));
+  return l;
+}
+
+function optionsPeriode() {
+  const auj = jourLocal();
+  if (etatStats.type === 'annee') {
+    const ans = new Set([auj.slice(0, 4)]);
+    shiftsRecents.forEach(s => ans.add(dateShift(s).slice(0, 4)));
+    return [...ans].sort().reverse().map(a => '<option value="' + a + '">' + a + '</option>').join('');
+  }
+  const mois = new Set([auj.slice(0, 7)]);
+  shiftsRecents.forEach(s => mois.add(dateShift(s).slice(0, 7)));
+  return [...mois].sort().reverse().map(m => '<option value="' + m + '">' + moisLibelle(m) + '</option>').join('');
+}
+
+function renderStats() {
+  const z = $('stContenu');
+  if (!z || $('ongletStats').classList.contains('cache')) return;
+  // Contrôles de période
+  $('stType').value = etatStats.type;
+  $('stValeur').classList.toggle('cache', etatStats.type === 'libre');
+  $('stLibre').classList.toggle('cache', etatStats.type !== 'libre');
+  if (etatStats.type !== 'libre') {
+    $('stValeur').innerHTML = optionsPeriode();
+    if (!etatStats.valeur || ![...$('stValeur').options].some(o => o.value === etatStats.valeur)) etatStats.valeur = $('stValeur').options[0].value;
+    $('stValeur').value = etatStats.valeur;
+  }
+  const [d1, d2] = bornesStats();
+  const r = calculerPeriode(d1, d2);
+  const manque = joursSansShift(d1, d2, r.dates);
+  let h = '<div class="entreprise">' + ENTREPRISE.map(esc).join('<br>') + '</div>' +
+    '<h2 class="titre-inv">Statistiques du shop · ' + (etatStats.type === 'mois' ? moisLibelle(d1.slice(0, 7)) : etatStats.type === 'annee' ? d1.slice(0, 4) : dateBelge(d1) + ' → ' + dateBelge(d2)) + '</h2>';
+  h += '<p class="aide">' + r.shifts + ' shift(s) importé(s)' +
+    (manque.length ? ' · <span class="sansprix">' + manque.length + ' jour(s) sans shift : ' + manque.slice(0, 8).map(dateBelge).map(x => x.slice(0, 5)).join(', ') + (manque.length > 8 ? '…' : '') + '</span>' : '') +
+    (r.sansDetail ? ' · ' + r.sansDetail + ' shift(s) importé(s) avant la v0.7.0 (sans détail)' : '') + '</p>';
+  if (!r.shifts) {
+    z.innerHTML = h + '<p class="aide">Aucun shift importé sur cette période : les statistiques viennent des ventes de shift importées (Outils).</p>' + blocBeneficeMois(d1.slice(0, 4)) + blocMarges();
+    brancherStats();
+    return;
+  }
+  h += '<div class="chiffres">' +
+    '<div><span>Ventes TTC</span><b>' + euro(arrondi(r.ventesTTC, 2)) + '</b></div>' +
+    '<div><span>Marge sur ventes</span><b>' + euro(arrondi(r.marge, 2)) + '</b><span>' + pct(r.htAvecPA ? r.marge / r.htAvecPA : null) + '</span></div>' +
+    '<div><span>Bénéfice brut</span><b>' + euro(arrondi(r.benefice, 2)) + '</b></div></div>';
+  h += '<table class="inv"><tbody>' +
+    '<tr><td>Ventes HT (stock)</td><td class="n">' + euro(arrondi(r.ventesHT, 2)) + '</td></tr>' +
+    '<tr><td>− Coût d\'achat des articles vendus</td><td class="n">' + euro(arrondi(r.cout, 2)) + '</td></tr>' +
+    (r.htSansPA ? '<tr><td class="aide">dont ventes sans prix d\'achat (exclues de la marge)</td><td class="n aide">' + euro(arrondi(r.htSansPA, 2)) + '</td></tr>' : '') +
+    '<tr class="st"><td>= Marge sur ventes</td><td class="n">' + euro(arrondi(r.marge, 2)) + '</td></tr>' +
+    '<tr><td>+ Gain café (' + fmtQte(r.cafeQte) + ' cafés : ' + euro(arrondi(r.cafeHT, 2)) + ' HT − fournitures ' + euro(arrondi(r.achatsCafe, 2)) + ')</td><td class="n">' + euro(arrondi(r.gainCafe, 2)) + '</td></tr>' +
+    '<tr><td>+ Commission loterie' + (r.commission ? '' : ' <span class="aide">(à encoder plus bas)</span>') + '</td><td class="n">' + euro(arrondi(r.commission, 2)) + '</td></tr>' +
+    '<tr><td>− Sorties (périmés, casse, vol…)</td><td class="n">' + euro(arrondi(r.sorties, 2)) + '</td></tr>' +
+    '<tr class="total"><td>= Bénéfice brut du shop</td><td class="n">' + euro(arrondi(r.benefice, 2)) + '</td></tr></tbody></table>' +
+    '<p class="aide">Bénéfice brut : avant salaires, loyer, énergie… Loterie : solde caisse de la période ' + euro(arrondi(r.loterieSolde, 2)) + ' (ventes − gains payés), pour information.' +
+    (r.cafeQte ? ' Coût moyen d\'un café : ' + euro(arrondi(r.achatsCafe / r.cafeQte, 3)) + '.' : '') + '</p>';
+  // Par code rapport
+  const crs = Object.entries(r.parCr).sort((a, b) => b[1].ht - a[1].ht);
+  h += '<h3 class="st-titre">Par code rapport</h3><div class="defile"><table class="inv"><thead><tr><th>Code rapport</th><th class="n">Ventes HT</th><th class="n">Marge</th><th class="n">%</th><th class="n">Part</th></tr></thead><tbody>' +
+    crs.map(([c, v]) => '<tr><td>' + esc(libCategorie(c)) + '</td><td class="n">' + euro(arrondi(v.ht, 2)) + '</td><td class="n">' + euro(arrondi(v.htAvecPA - v.cout, 2)) + '</td>' +
+      '<td class="n">' + pct(v.htAvecPA ? (v.htAvecPA - v.cout) / v.htAvecPA : null) + '</td><td class="n">' + pct(r.ventesHT ? v.ht / r.ventesHT : null) + '</td></tr>').join('') +
+    '</tbody></table></div>';
+  // Meilleures ventes
+  const triL = { q: 'Quantité', ca: 'Chiffre d\'affaires', marge: 'Marge' };
+  let prods = [...r.parProduit.values()].map(x => Object.assign(x, { p: catalogue.get(x.code) || { description: x.code, codeRapport: '0000' }, marge: x.htAvecPA - x.cout }));
+  if (etatStats.cr !== 'tous') prods = prods.filter(x => (x.p.codeRapport || '0000') === etatStats.cr);
+  prods.sort((a, b) => etatStats.tri === 'ca' ? b.ttc - a.ttc : etatStats.tri === 'marge' ? b.marge - a.marge : b.q - a.q);
+  h += '<h3 class="st-titre">Meilleures ventes</h3>' +
+    '<div class="deux no-print"><select id="stCr"><option value="tous">Tout le shop</option>' + crs.map(([c]) => '<option value="' + esc(c) + '"' + (c === etatStats.cr ? ' selected' : '') + '>' + esc(libCategorie(c)) + '</option>').join('') + '</select>' +
+    '<select id="stTri">' + Object.entries(triL).map(([k, v]) => '<option value="' + k + '"' + (k === etatStats.tri ? ' selected' : '') + '>par ' + v.toLowerCase() + '</option>').join('') + '</select></div>' +
+    '<div class="defile"><table class="inv"><thead><tr><th>#</th><th>Produit</th><th class="n">Qté</th><th class="n">TTC</th><th class="n">Marge</th></tr></thead><tbody>' +
+    prods.slice(0, 10).map((x, i) => '<tr><td>' + (i + 1) + '</td><td>' + esc(x.p.description) + '</td><td class="n">' + fmtQte(x.q) + '</td><td class="n">' + euro(arrondi(x.ttc, 2)) + '</td>' +
+      '<td class="n">' + (x.htAvecPA ? euro(arrondi(x.marge, 2)) : '<span class="aide">PA ?</span>') + '</td></tr>').join('') +
+    (prods.length ? '' : '<tr><td colspan="5" class="aide">Aucune vente.</td></tr>') + '</tbody></table></div>';
+  // Café et loterie
+  h += '<h3 class="st-titre">Hors stock</h3><table class="inv"><tbody>' +
+    '<tr><td>☕ Café à emporter</td><td class="n">' + fmtQte(r.cafeQte) + ' · ' + euro(arrondi(r.cafeTTC, 2)) + ' TTC</td></tr>' +
+    '<tr><td>🎟 Loterie (solde caisse)</td><td class="n">' + euro(arrondi(r.loterieSolde, 2)) + '</td></tr></tbody></table>';
+  // Produits qui dorment
+  const nbJours = (new Date(d2) - new Date(d1)) / 86400000 + 1;
+  if (nbJours >= 28) {
+    const dorment = [...catalogue.values()].filter(p => actif(p) && (p.stock || 0) > 0 && !r.parProduit.has(p.code) && !(r.parProduit.size === 0))
+      .map(p => ({ p, v: (p.stock || 0) * (p.dernierPrixHT || 0) })).sort((a, b) => b.v - a.v);
+    if (dorment.length) {
+      h += '<h3 class="st-titre">Produits sans vente sur la période (' + dorment.length + ')</h3><div class="defile"><table class="inv"><thead><tr><th>Produit</th><th class="n">Stock</th><th class="n">Valeur HT</th></tr></thead><tbody>' +
+        dorment.slice(0, 20).map(x => '<tr><td>' + esc(x.p.description) + '</td><td class="n">' + fmtQte(x.p.stock) + '</td><td class="n">' + (x.p.dernierPrixHT != null ? euro(arrondi(x.v, 2)) : '—') + '</td></tr>').join('') +
+        '</tbody></table></div><p class="aide">Valeur immobilisée totale : ' + euro(arrondi(dorment.reduce((s, x) => s + x.v, 0), 2)) + ' HT.</p>';
+    }
+  }
+  z.innerHTML = h + blocBeneficeMois(d1.slice(0, 4)) + blocMarges();
+  brancherStats();
+}
+
+function blocBeneficeMois(annee) {
+  const lignes = [];
+  for (let m = 1; m <= 12; m++) {
+    const mm = annee + '-' + String(m).padStart(2, '0');
+    if (mm > jourLocal().slice(0, 7)) break;
+    const r = calculerPeriode(mm + '-01', jourLocal(new Date(Number(annee), m, 0)));
+    lignes.push({ mm, r });
+  }
+  const max = Math.max(1, ...lignes.map(l => Math.abs(l.r.benefice)));
+  return '<h3 class="st-titre">Bénéfice brut par mois · ' + annee + '</h3><div class="defile"><table class="inv"><thead><tr><th>Mois</th><th class="n">Ventes HT</th><th class="n">Marge</th><th class="n">Café</th><th class="n">Loterie (commission)</th><th class="n">Sorties</th><th class="n">Bénéfice</th><th></th></tr></thead><tbody>' +
+    lignes.map(({ mm, r }) => '<tr><td>' + moisLibelle(mm) + '</td><td class="n">' + euro(arrondi(r.ventesHT, 2)) + '</td><td class="n">' + euro(arrondi(r.marge, 2)) + '</td>' +
+      '<td class="n">' + euro(arrondi(r.gainCafe, 2)) + '</td>' +
+      '<td class="n"><input type="text" inputmode="decimal" class="commission no-print-border" data-mois="' + mm + '" value="' + (statsMois[mm] && statsMois[mm].commissionLoterie != null ? String(statsMois[mm].commissionLoterie).replace('.', ',') : '') + '" placeholder="—"></td>' +
+      '<td class="n">' + euro(arrondi(r.sorties, 2)) + '</td><td class="n"><b>' + euro(arrondi(r.benefice, 2)) + '</b></td>' +
+      '<td style="min-width:60px"><div class="barre-mois' + (r.benefice < 0 ? ' neg' : '') + '" style="width:' + Math.round(Math.abs(r.benefice) / max * 100) + '%"></div></td></tr>').join('') +
+    '<tr class="total"><td>Total</td><td class="n">' + euro(arrondi(lignes.reduce((s, l) => s + l.r.ventesHT, 0), 2)) + '</td><td class="n">' + euro(arrondi(lignes.reduce((s, l) => s + l.r.marge, 0), 2)) + '</td>' +
+    '<td class="n">' + euro(arrondi(lignes.reduce((s, l) => s + l.r.gainCafe, 0), 2)) + '</td><td class="n">' + euro(arrondi(lignes.reduce((s, l) => s + l.r.commission, 0), 2)) + '</td>' +
+    '<td class="n">' + euro(arrondi(lignes.reduce((s, l) => s + l.r.sorties, 0), 2)) + '</td><td class="n">' + euro(arrondi(lignes.reduce((s, l) => s + l.r.benefice, 0), 2)) + '</td><td></td></tr>' +
+    '</tbody></table></div><p class="aide no-print">Commission loterie : tapez le montant du décompte de la Loterie Nationale pour chaque mois (Entrée pour enregistrer).</p>';
+}
+
+function blocMarges() {
+  const cr = etatStats.margeCr;
+  const codes = codesRapport();
+  let l = [...catalogue.values()].filter(p => actif(p) && (cr === 'tous' || (p.codeRapport || '0000') === cr))
+    .map(p => ({ p, m: margeProduit(p) })).filter(x => x.m && x.m.pa != null);
+  const faibles = l.filter(x => margeFaible(x.p)).length;
+  l.sort((a, b) => a.m.taux - b.m.taux);
+  return '<h3 class="st-titre">Marges des produits</h3>' +
+    '<select id="stMargeCr" class="no-print"><option value="tous">Tous les codes rapport</option>' + codes.map(c => '<option value="' + esc(c) + '"' + (c === cr ? ' selected' : '') + '>' + esc(libCategorie(c)) + '</option>').join('') + '</select>' +
+    '<table class="inv" style="margin-top:8px"><thead><tr><th>Code rapport</th><th class="n">Marge habituelle</th><th class="n">Objectif</th></tr></thead><tbody>' +
+      codes.filter(c => cr === 'tous' || c === cr).map(c => {
+        const ci = CATEGORIES[c] || {};
+        return '<tr><td>' + esc(libCategorie(c)) + '</td><td class="n">' + (ci.prixImpose ? 'prix imposé' : pct(margeObservee(c))) + '</td><td class="n">' + (ci.prixImpose ? '—' : ci.margeCible != null ? ci.margeCible + ' %' : '= habituelle') + '</td></tr>';
+      }).join('') + '</tbody></table>' +
+    '<p class="aide">' + l.length + ' produit(s) avec prix d\'achat et de vente' + (faibles ? ' · <span class="sansprix">' + faibles + ' marge(s) faible(s)</span> (plus de 10 points sous l\'objectif)' : '') + '. Objectifs et prix imposés : Outils → Catégories. Les plus faibles marges d\'abord :</p>' +
+    '<div class="defile"><table class="inv"><thead><tr><th>Produit</th><th class="n">Vente TTC</th><th class="n">Achat HT</th><th class="n">Marge</th><th class="n">Conseillé</th></tr></thead><tbody>' +
+    l.slice(0, 60).map(x => {
+      const pc = prixConseille(x.p);
+      return '<tr data-code="' + esc(x.p.code) + '"><td>' + esc(x.p.description) + (prixImpose(x.p) ? ' <span class="badge">imposé</span>' : '') + '</td><td class="n">' + euro(x.p.prixVenteTTC) + '</td><td class="n">' + fmtPU(x.m.pa) + '</td>' +
+        '<td class="n' + (margeFaible(x.p) ? ' sansprix' : '') + '">' + pct(x.m.taux) + '</td><td class="n">' + (pc != null && Math.abs(pc - x.p.prixVenteTTC) >= 0.05 ? euro(pc) : '—') + '</td></tr>';
+    }).join('') + (l.length ? '' : '<tr><td colspan="5" class="aide">Aucun produit avec prix d\'achat et prix de vente.</td></tr>') + '</tbody></table></div>' +
+    (l.length > 60 ? '<p class="aide">… ' + (l.length - 60) + ' autre(s) : exportez en CSV pour tout voir.</p>' : '');
+}
+
+function brancherStats() {
+  if ($('stCr')) $('stCr').onchange = () => { etatStats.cr = $('stCr').value; renderStats(); };
+  if ($('stTri')) $('stTri').onchange = () => { etatStats.tri = $('stTri').value; renderStats(); };
+  if ($('stMargeCr')) $('stMargeCr').onchange = () => { etatStats.margeCr = $('stMargeCr').value; renderStats(); };
+  document.querySelectorAll('#stContenu .commission').forEach(inp => {
+    const sauver = () => {
+      const v = inp.value.trim() === '' ? null : lireNombre(inp.value);
+      const avant = statsMois[inp.dataset.mois] ? statsMois[inp.dataset.mois].commissionLoterie : null;
+      if (v === avant || (v == null && avant == null)) return;
+      db.collection('statsMois').doc(inp.dataset.mois).set({ commissionLoterie: v, majPar: utilisateur, majLe: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+        .catch(e => toast('Refusé : ' + e.code, 'ko'));
+      toast('Commission loterie ' + moisLibelle(inp.dataset.mois) + ' : ' + (v == null ? 'effacée' : euro(v)));
+    };
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } };
+    inp.onchange = sauver;
+  });
+  document.querySelectorAll('#stContenu tr[data-code]').forEach(tr => {
+    tr.onclick = () => { if (catalogue.has(tr.dataset.code)) ouvrirFiche('modif', catalogue.get(tr.dataset.code)); };
+  });
+}
+$('stType').addEventListener('change', () => { etatStats.type = $('stType').value; etatStats.valeur = null; renderStats(); });
+$('stValeur').addEventListener('change', () => { etatStats.valeur = $('stValeur').value; renderStats(); });
+$('stDu').addEventListener('change', () => { etatStats.du = $('stDu').value; renderStats(); });
+$('stAu').addEventListener('change', () => { etatStats.au = $('stAu').value; renderStats(); });
+$('stImprimer').addEventListener('click', () => { renderStats(); window.print(); });
+$('stExporter').addEventListener('click', () => {
+  const [d1, d2] = bornesStats();
+  const r = calculerPeriode(d1, d2);
+  const num = v => v == null ? '' : String(arrondi(v, 4)).replace('.', ',');
+  const txt = v => String(v == null ? '' : v).replace(/;/g, ',');
+  const l = [['code', 'description', 'code_rapport', 'quantite', 'ventes_ttc', 'ventes_ht', 'cout_achat', 'marge', 'taux_marge'].join(';')];
+  [...r.parProduit.values()].sort((a, b) => b.ttc - a.ttc).forEach(x => {
+    const p = catalogue.get(x.code) || {};
+    const m = x.htAvecPA ? x.htAvecPA - x.cout : null;
+    l.push(['="' + x.code + '"', txt(p.description), txt(p.codeRapport), num(x.q), num(x.ttc), num(x.ht), x.htAvecPA ? num(x.cout) : '', num(m), m != null && x.htAvecPA ? num(m / x.htAvecPA) : ''].join(';'));
+  });
+  l.push('');
+  l.push(['resume', 'ventes_ht', num(r.ventesHT), 'marge', num(r.marge), 'gain_cafe', num(r.gainCafe), 'commission_loterie', num(r.commission), 'sorties', num(r.sorties), 'benefice_brut', num(r.benefice)].join(';'));
+  telecharger('stats_shop_' + d1 + '_' + d2 + '.csv', '﻿' + l.join('\r\n'), 'text/csv;charset=utf-8');
+});
+// ============================================================
 //  CATALOGUE
 // ============================================================
 // Codes rapport présents : catégories connues + codes portés par des produits, dans l'ordre des codes
@@ -5113,10 +5536,11 @@ async function sauvegarder(motif) {
   const alias = await lire('alias');
   const comptages = await lire('comptages');
   const inventaires = await lire('inventaires');
+  const statsMoisSauv = await lire('statsMois');
   const produits = [...catalogue.entries()].map(([id, p]) => Object.assign({ id }, versJSON(p)));
   const contenu = JSON.stringify({
     application: 'Stock Shop Paliseul', version: VERSION, date: new Date().toISOString(), par: utilisateur,
-    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises, lots, factures, shifts, correspondances, alias, comptages, inventaires
+    motif: motif || 'manuelle', categories: CATEGORIES, produits, mouvements, remisesZero: remises, lots, factures, shifts, correspondances, alias, comptages, inventaires, statsMois: statsMoisSauv
   }, null, 1);
   const heure = new Date().toTimeString().slice(0, 5).replace(':', 'h');
   telecharger('sauvegarde_stock_shop_' + jourLocal() + '_' + heure + '.json', contenu, 'application/json');
@@ -5150,7 +5574,8 @@ function renderCategoriesOutils() {
   ul.innerHTML = [...codes].map(c => {
     const v = CATEGORIES[c];
     return '<li><div class="desc"><b>' + esc(v ? v.nom : 'Code ' + c) + '</b> <span class="code">' + esc(c) + '</span><br>' +
-      '<span class="aide">' + (v ? 'Abrégé « ' + esc(v.court) + ' » · TVA ' + esc(v.tva) + ' %' + (v.peremption ? ' · péremption suivie' : '') : 'Non définie') +
+      '<span class="aide">' + (v ? 'Abrégé « ' + esc(v.court) + ' » · TVA ' + esc(v.tva) + ' %' + (v.peremption ? ' · péremption suivie' : '') +
+        (v.prixImpose ? ' · prix imposé' : ' · marge ' + (v.margeCible != null ? 'objectif ' + v.margeCible + ' %' : 'habituelle ' + pct(margeObservee(c)))) : 'Non définie') +
       ' · ' + (compte[c] || 0) + ' produit(s)</span></div>' +
       '<button class="btn second petit" data-cat="' + esc(c) + '">Modifier</button></li>';
   }).join('');
@@ -5174,6 +5599,8 @@ function ouvrirCategorie(code) {
       '<div><label for="kcTva">TVA par défaut</label><select id="kcTva">' + optionsTva(v.tva) + '</select></div>' +
     '</div>' +
     '<label class="coche" style="margin-top:12px"><input type="checkbox" id="kcPer"' + (v.peremption ? ' checked' : '') + '> Suivre les dates de péremption (alertes)</label>' +
+    '<label class="coche"><input type="checkbox" id="kcImp"' + (v.prixImpose ? ' checked' : '') + '> Prix de vente imposé (tabac, cartes téléphone, sacs PMC…) : pas de prix conseillé</label>' +
+    '<label for="kcMarge">Objectif de marge (% du prix de vente HT)</label><input type="text" id="kcMarge" inputmode="decimal" placeholder="vide = marge habituelle' + (code && margeObservee(code) != null ? ' (' + pct(margeObservee(code)) + ')' : '') + '" value="' + (v.margeCible != null ? String(v.margeCible).replace('.', ',') : '') + '">' +
     '<p class="aide">La TVA par défaut sert aux nouveaux produits de cette catégorie. Les produits existants gardent leur propre taux.</p>' +
     '<div class="actions"><button class="btn second" id="kcAnnuler">Annuler</button><button class="btn" id="kcOk">Enregistrer</button></div>';
   $('fond').classList.remove('cache');
@@ -5187,6 +5614,7 @@ function ouvrirCategorie(code) {
     if (!nom) { toast('Indiquez le nom.', 'warn'); return; }
     db.collection('categories').doc(c).set({
       nom, court: $('kcCourt').value.trim() || nom.slice(0, 12), tva: Number($('kcTva').value), peremption: $('kcPer').checked,
+      prixImpose: $('kcImp').checked, margeCible: $('kcMarge').value.trim() === '' ? null : lireNombre($('kcMarge').value),
       modifiePar: utilisateur, modifieLe: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true }).catch(e => toast('Enregistrement refusé : ' + e.code, 'ko'));
     toast('Catégorie enregistrée');
@@ -5437,8 +5865,20 @@ function guideHTML() {
   '<li>Les inventaires enregistrés sont listés dans la carte : <b>Voir / imprimer</b>, puis Imprimer / PDF ou Exporter (CSV). « Revenir au stock actuel » pour quitter.</li></ol>' +
   '<div class="astuce">Faites le comptage (Inventaire rapide) le 31/12 ou dans les premiers jours de janvier, clôturez-le, importez les shifts et factures jusqu\'à ce jour-là, puis calculez l\'inventaire au 31/12.</div></details>' +
 
+  '<details><summary>9 bis. Statistiques, marges et bénéfice</summary>' +
+  '<p>Onglet <b>Stats</b> : choisissez un mois, une année ou des dates libres. Les chiffres viennent des <b>ventes de shift importées</b> : l\'appli signale les jours sans shift dans la période.</p><ul>' +
+  '<li><b>Résumé</b> : ventes TTC et HT, marge sur ventes (ventes HT − prix d\'achat des articles vendus), bénéfice brut.</li>' +
+  '<li><b>Bénéfice brut</b> = marge sur ventes + gain café + commission loterie − sorties (périmés, casse, vol, consommation). C\'est avant salaires, loyer, énergie…</li>' +
+  '<li>Le prix d\'achat est <b>figé le jour de la vente</b> : un changement de prix plus tard ne modifie pas les mois passés. Les ventes de produits sans prix d\'achat sont montrées à part et exclues de la marge.</li>' +
+  '<li><b>Par code rapport</b>, <b>meilleures ventes</b> (top 10 par quantité, chiffre d\'affaires ou marge, pour le shop ou un code rapport) et <b>produits sans vente</b> sur la période, avec la valeur immobilisée.</li>' +
+  '<li><b>Café à emporter</b> : comptés à l\'import des shifts, hors stock. Les fournitures café des factures (café, gobelets, couvercles, sucre…) sont déduites : gain café = ventes HT − fournitures. Le coût moyen d\'un café est calculé tout seul.</li>' +
+  '<li><b>Loterie</b> : le code 9500 du shift mélange ventes et gains payés : il est affiché pour information (« solde caisse »). Le vrai gain est la <b>commission</b> du décompte de la Loterie Nationale : tapez-la dans le tableau « Bénéfice brut par mois ».</li>' +
+  '<li><b>Imprimer / PDF</b> et <b>Exporter (CSV)</b> : ventes par produit de la période et résumé.</li></ul>' +
+  '<p><b>Marges</b> : chaque fiche produit affiche le prix de vente HT, la marge en € et en % du prix de vente, l\'objectif et le <b>prix conseillé</b> (arrondi aux 5 cents). L\'objectif d\'un code rapport est sa <b>marge habituelle</b> (calculée sur vos produits) ou celui que vous fixez dans Outils → Catégories. « ⚠️ marge faible » = plus de 10 points sous l\'objectif. À l\'import d\'une facture, 📉 signale les produits dont la marge devient faible avec le nouveau prix d\'achat.</p>' +
+  '<p><b>Prix imposés</b> (tabac, cautions, cartes téléphone, sacs PMC…) : la marge est affichée, mais jamais de prix conseillé ni d\'alerte. Réglage par catégorie (Outils → Catégories) ou par produit (Infos produit → Prix de vente imposé).</p></details>' +
+
   '<details><summary>10. Catégories (codes rapport)</summary>' +
-  '<p>Outils → <b>Catégories</b> : renommez une catégorie, changez son nom abrégé (filtres) ou sa TVA par défaut, ou ajoutez-en une avec son code rapport FuelPOS. La TVA par défaut ne s\'applique qu\'aux nouveaux produits.</p></details>' +
+  '<p>Outils → <b>Catégories</b> : renommez une catégorie, changez son nom abrégé (filtres) ou sa TVA par défaut, cochez « Prix de vente imposé », fixez un objectif de marge, ou ajoutez-en une avec son code rapport FuelPOS. La TVA par défaut ne s\'applique qu\'aux nouveaux produits.</p></details>' +
 
   '<details><summary>11. Importer une liste (Excel ou CSV)</summary>' +
   '<ol><li>Outils → <b>Importer</b> : choisissez un fichier <b>Excel (.xlsx)</b> ou <b>CSV</b>.</li>' +
