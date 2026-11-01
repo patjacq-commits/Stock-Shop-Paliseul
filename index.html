@@ -187,6 +187,9 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 .guide ul,.guide ol{padding-left:20px;margin:6px 0 10px}
 .guide .astuce{background:#eef3fa;border-radius:8px;padding:8px 10px;font-size:14px;margin:8px 0 10px}
 .guide-impr{display:none}
+.deballe{border-top:1px solid #edf0f3;padding:8px 0 4px}
+.deballe:first-of-type{border-top:0}
+#cpListe li{cursor:pointer}
 .calc-colis{display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:13px;color:var(--gris);margin-top:6px}
 .calc-colis input{width:58px;padding:6px 6px;font-size:14px}
 .upcLigne{width:56px!important;padding:4px 6px!important;font-size:13px!important}
@@ -477,11 +480,16 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.6.2';
+const VERSION = 'v0.6.3';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.6.3', date: '01/11/2026', points: [
+    'Packs : Jupiler 6x33cl, Jupiler 6X50cl et Desperados 4x50cl sont reliés à leur canette (6 ou 4 pièces).',
+    'Bouton « Déballer » dans la fiche du pack (et de la canette) : les packs ouverts sont retirés et les canettes ajoutées, comme la conversion dans Tokheim. Annulable.',
+    'Infos produit → « Pack » : indiquer qu\'un autre produit est un pack de n pièces.'
+  ] },
   { v: 'v0.6.2', date: '01/11/2026', points: [
     'Tout se compte à la pièce : à l\'import d\'une facture, les fardes et cartons sont convertis en pièces (« 3 × 10 = 30 pc », prix de la farde ÷ 10).',
     'Aperçu de la facture : case « pièces par colis » modifiable sur chaque ligne, et alerte quand le prix semble être celui d\'une farde ou d\'un carton encodé comme une pièce.',
@@ -905,6 +913,7 @@ function ecouterCatalogue() {
     majResumeFiche();
     renderArchives();
     renderCarteComptage();
+    installerPacksDefaut();
     if (sessionComptage) renderEcranComptage();
   }, err => {
     console.error(err);
@@ -1272,12 +1281,14 @@ async function ouvrirFiche(mode, p) {
     (suiviPeremption(p) || lotsActifs.some(l => l.code === p.code) ? blocPeremption(p) : '') +
     blocComptage(p) +
     blocSortie() +
+    blocDeballage(p) +
     '<div class="bloc"><h3>Historique</h3><ul class="histo" id="hListe"><li class="aide">Chargement…</li></ul></div>' +
     '<details class="bloc"><summary>Infos produit (désignation, catégorie, prix de vente)</summary>' +
       champsProduit(p) +
       '<div class="meta">' + metaProduit(p) + '</div>' +
       '<div class="actions"><button class="btn" id="fEnregistrer">Enregistrer les infos</button></div>' +
       blocCodesSecondaires() +
+      blocContenuPack(p) +
       (p.archive ? '' : '<button class="btn second plein" id="frCorrCode" style="margin-top:14px">Corriger le code-barres…</button>' +
         '<button class="btn danger plein" id="frRetirer" style="margin-top:8px">Retirer du catalogue…</button>') +
     '</details>' +
@@ -1312,6 +1323,8 @@ async function ouvrirFiche(mode, p) {
   }
   if ($('frReactiver')) $('frReactiver').onclick = () => reactiverProduit(p.code).then(() => { if (catalogue.has(p.code)) ouvrirFiche('modif', Object.assign({}, catalogue.get(p.code), { archive: false })); });
   brancherCodesFiche();
+  brancherDeballage();
+  brancherContenuPack();
   majResumeFiche();
   majCalcul();
   ecouterHistorique(p.code);
@@ -1670,6 +1683,10 @@ function renderHistorique() {
       if (det) txt += '<br><span class="aide">' + esc(det) + '</span>';
     } else if (m.type === 'vente') {
       txt = 'Vente shift ' + esc(m.shift) + ' : <b>' + fmtQte(m.quantite) + '</b>' + (m.montantTTC != null ? ' · ' + euro(m.montantTTC) + ' TTC' : '');
+    } else if (m.type === 'deballage') {
+      txt = m.quantite < 0
+        ? 'Déballé : <b>' + fmtQte(m.quantite) + '</b> pack(s) → +' + fmtQte(m.pieces) + ' ' + esc(m.autreDescription)
+        : 'Déballage de ' + fmtQte(m.packs) + ' × ' + esc(m.autreDescription) + ' : <b>+' + fmtQte(m.quantite) + '</b>';
     } else if (m.type === 'prix') {
       txt = 'Prix d\'achat encodé : <b>' + fmtPU(m.prixUnitaireHT) + ' HT</b> (sans quantité)' + (m.fournisseur ? '<br><span class="aide">' + esc(m.fournisseur) + '</span>' : '');
     } else if (m.type === 'restauration') {
@@ -1703,8 +1720,16 @@ async function annulerMouvement(id) {
   if (m.lotPeremption) {
     try { lotExiste = (await db.collection('lots').doc(m.lotPeremption).get()).exists; } catch (e) { lotExiste = false; }
   }
+  let lie = null;
+  if (m.type === 'deballage' && m.lie) {
+    try { const s = await db.collection('mouvements').doc(m.lie).get(); if (s.exists && !s.data().annulee) lie = Object.assign({ id: s.id }, s.data()); } catch (e) { lie = null; }
+  }
   const lot = db.batch();
   lot.update(db.collection('mouvements').doc(id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
+  if (lie) {
+    lot.update(db.collection('mouvements').doc(lie.id), { annulee: true, annuleePar: utilisateur, annuleeLe: FV.serverTimestamp() });
+    lot.update(db.collection('produits').doc(codeActuel(lie.code)), { stock: FV.increment(-lie.quantite) });
+  }
   const maj = { stock: FV.increment(-m.quantite) };
   if (m.type === 'entree' || m.type === 'prix') {
     // Le dernier prix redevient celui de l'entrée valide la plus récente
@@ -4298,6 +4323,144 @@ function validerPrixManquant(inp) {
   }, 150);
 }
 // ============================================================
+//  PACKS : un pack contient n pièces d'un autre produit ; « Déballer » convertit comme dans Tokheim
+// ============================================================
+const PACKS_DEFAUT = [
+  ['5410228214946', '5410228214939', 6],   // Jupiler 6x33cl → Jupiler 33cl
+  ['5410228293538', '5410228215066', 6],   // Jupiler 6X50cl → Jupiler 50cl
+  ['5410263929218', '5410263929256', 4]    // Desperados 4x50cl → Desperados 50CL
+];
+let packsInstalles = false;
+// Une seule fois pour toute l'appli : liens des packs connus
+async function installerPacksDefaut() {
+  if (packsInstalles || !catalogue.size) return;
+  packsInstalles = true;
+  try {
+    const ref = db.collection('parametres').doc('migrations');
+    const s = await ref.get();
+    if (s.exists && s.data().packs063) return;
+    const lot = db.batch();
+    let n = 0;
+    PACKS_DEFAUT.forEach(([pack, piece, k]) => {
+      const p = catalogue.get(pack);
+      if (p && catalogue.has(piece) && !p.contenu) { lot.update(db.collection('produits').doc(pack), { contenu: { code: piece, n: k } }); n++; }
+    });
+    lot.set(ref, { packs063: true, par: utilisateur }, { merge: true });
+    await lot.commit();
+    if (n) console.info('Packs configurés :', n);
+  } catch (e) { packsInstalles = false; console.warn('Packs', e.code || e.message); }
+}
+// Packs qui contiennent ce produit
+function packsDe(code) {
+  return [...catalogue.values()].filter(p => actif(p) && p.contenu && p.contenu.code === code && catalogue.has(p.code));
+}
+
+function blocDeballage(p) {
+  const lignes = [];
+  if (p.contenu && catalogue.has(p.contenu.code)) lignes.push(p);
+  packsDe(p.code).forEach(x => lignes.push(x));
+  if (!lignes.length) return '';
+  return '<div class="bloc"><h3>Déballer des packs</h3>' + lignes.map(pk => {
+    const piece = catalogue.get(pk.contenu.code);
+    return '<div class="deballe"><div><b>' + esc(pk.description) + '</b> = ' + fmtQte(pk.contenu.n) + ' × ' + esc(piece.description) +
+      ' <span class="aide">(packs en stock : ' + fmtQte(pk.stock || 0) + ')</span></div>' +
+      '<div class="ligne" style="margin-top:4px"><input type="text" inputmode="numeric" data-dbnb="' + esc(pk.code) + '" placeholder="Nombre de packs" value="1">' +
+      '<button class="btn second" data-dbok="' + esc(pk.code) + '">Déballer</button></div>' +
+      '<div class="aide" data-dbtxt="' + esc(pk.code) + '">1 pack → +' + fmtQte(pk.contenu.n) + ' ' + esc(piece.description) + '</div></div>';
+  }).join('') + '<p class="aide">Comme la conversion dans Tokheim : les packs ouverts sont retirés et les pièces ajoutées.</p></div>';
+}
+function brancherDeballage() {
+  document.querySelectorAll('[data-dbnb]').forEach(inp => {
+    inp.oninput = () => {
+      const pk = catalogue.get(inp.dataset.dbnb), n = lireNombre(inp.value) || 0;
+      const t = document.querySelector('[data-dbtxt="' + inp.dataset.dbnb + '"]');
+      if (pk && t) t.textContent = fmtQte(n) + ' pack(s) → +' + fmtQte(arrondi(n * pk.contenu.n, 3)) + ' ' + catalogue.get(pk.contenu.code).description;
+    };
+  });
+  document.querySelectorAll('[data-dbok]').forEach(b => {
+    b.onclick = () => {
+      const n = lireNombre(document.querySelector('[data-dbnb="' + b.dataset.dbok + '"]').value);
+      deballer(b.dataset.dbok, n);
+    };
+  });
+}
+function deballer(packCode, n) {
+  const pk = catalogue.get(packCode);
+  if (!pk || !pk.contenu) return;
+  const piece = catalogue.get(pk.contenu.code);
+  if (!piece) { toast('Le produit contenu dans ce pack est introuvable.', 'ko'); return; }
+  if (!n || n <= 0 || n !== Math.floor(n)) { toast('Indiquez un nombre entier de packs.', 'warn'); return; }
+  const pieces = arrondi(n * pk.contenu.n, 3);
+  const reste = arrondi((pk.stock || 0) - n, 3);
+  if (!confirm('Déballer ' + fmtQte(n) + ' × « ' + pk.description + ' » ?\n\n' + pk.description + ' : ' + fmtQte(pk.stock || 0) + ' → ' + fmtQte(reste) +
+    '\n' + piece.description + ' : ' + fmtQte(piece.stock || 0) + ' → ' + fmtQte(arrondi((piece.stock || 0) + pieces, 3)) +
+    (reste < 0 ? '\n\n⚠️ Le stock de packs deviendrait négatif : vérifiez.' : ''))) return;
+  const FV = firebase.firestore.FieldValue;
+  const lot = db.batch();
+  const refA = db.collection('mouvements').doc(), refB = db.collection('mouvements').doc();
+  const commun = { par: utilisateur, le: FV.serverTimestamp(), jour: jourLocal(), annulee: false };
+  lot.set(refA, Object.assign({ type: 'deballage', code: pk.code, description: pk.description || '', quantite: -n, lie: refB.id,
+    autreCode: piece.code, autreDescription: piece.description || '', pieces }, commun));
+  lot.set(refB, Object.assign({ type: 'deballage', code: piece.code, description: piece.description || '', quantite: pieces, lie: refA.id,
+    autreCode: pk.code, autreDescription: pk.description || '', packs: n }, commun));
+  lot.update(db.collection('produits').doc(pk.code), { stock: FV.increment(-n) });
+  lot.update(db.collection('produits').doc(piece.code), { stock: FV.increment(pieces) });
+  // La pièce n'a pas encore de prix d'achat : prix du pack ÷ nombre de pièces
+  if (piece.dernierPrixHT == null && pk.dernierPrixHT != null) {
+    const pu = arrondi(pk.dernierPrixHT / pk.contenu.n, 4);
+    lot.set(db.collection('mouvements').doc(), Object.assign({ type: 'prix', code: piece.code, description: piece.description || '', quantite: 0,
+      prixUnitaireHT: pu, fournisseur: pk.dernierFournisseur || null, depuisPack: pk.code }, commun));
+    lot.update(db.collection('produits').doc(piece.code), { dernierPrixHT: pu, dernierFournisseur: pk.dernierFournisseur || null });
+  }
+  lot.commit().catch(e => toast('Déballage refusé : ' + (e.code || e.message), 'ko'));
+  toast('Déballé : −' + fmtQte(n) + ' pack(s), +' + fmtQte(pieces) + ' ' + piece.description);
+}
+
+// ---------- Infos produit : « ce produit est un pack de… » ----------
+function blocContenuPack(p) {
+  const c = p.contenu && catalogue.get(p.contenu.code);
+  return '<label>Pack (vendu entier, déballé si besoin)</label>' +
+    '<div class="aide" id="cpActuel">' + (c ? 'Contient <b>' + fmtQte(p.contenu.n) + ' × ' + esc(c.description) + '</b>' : 'Ce produit n\'est pas un pack.') + '</div>' +
+    '<div class="ligne" style="margin-top:6px"><input type="text" id="cpN" inputmode="numeric" placeholder="nb" style="max-width:64px" value="' + esc(p.contenu ? p.contenu.n : '') + '">' +
+    '<input type="search" id="cpRech" placeholder="× produit contenu (nom ou code)…" autocomplete="off" value="' + esc(c ? c.description : '') + '"></div>' +
+    '<ul class="liste" id="cpListe"></ul>' +
+    '<div class="deux" style="margin-top:6px"><button class="btn second" id="cpEnreg">Enregistrer le pack</button>' +
+    '<button class="btn second" id="cpRetirer"' + (p.contenu ? '' : ' disabled') + '>Pas un pack</button></div>';
+}
+function brancherContenuPack() {
+  if (!$('cpRech')) return;
+  let choisi = (catalogue.get(ficheCourante.code) || {}).contenu ? catalogue.get(ficheCourante.code).contenu.code : null;
+  $('cpRech').oninput = () => {
+    choisi = null;
+    const v = $('cpRech').value.trim();
+    const l = v.length >= 2 ? rechercheProduits(v, 6).filter(x => x.p.code !== ficheCourante.code) : [];
+    $('cpListe').innerHTML = l.map(x => '<li data-cp="' + esc(x.p.code) + '"><div class="desc"><div class="nom">' + esc(x.p.description) + '</div><div class="sous">' + esc(x.p.code) + '</div></div></li>').join('');
+  };
+  $('cpListe').onclick = e => {
+    const li = e.target.closest('[data-cp]');
+    if (!li) return;
+    choisi = li.dataset.cp;
+    $('cpRech').value = catalogue.get(choisi).description;
+    $('cpListe').innerHTML = '';
+  };
+  $('cpEnreg').onclick = () => {
+    const n = lireNombre($('cpN').value);
+    if (!n || n < 2 || n !== Math.floor(n)) { toast('Nombre de pièces dans le pack (2 ou plus) ?', 'warn'); return; }
+    if (!choisi || !catalogue.has(choisi)) { toast('Choisissez le produit contenu dans la liste.', 'warn'); return; }
+    db.collection('produits').doc(ficheCourante.code).update({ contenu: { code: choisi, n }, modifiePar: utilisateur, modifieLe: firebase.firestore.FieldValue.serverTimestamp() })
+      .catch(e => toast('Refusé : ' + e.code, 'ko'));
+    $('cpActuel').innerHTML = 'Contient <b>' + fmtQte(n) + ' × ' + esc(catalogue.get(choisi).description) + '</b>';
+    $('cpRetirer').disabled = false;
+    toast('Pack enregistré : ' + n + ' × ' + catalogue.get(choisi).description);
+  };
+  $('cpRetirer').onclick = () => {
+    if (!confirm('Ce produit n\'est plus considéré comme un pack ?')) return;
+    db.collection('produits').doc(ficheCourante.code).update({ contenu: null }).catch(e => toast('Refusé : ' + e.code, 'ko'));
+    $('cpActuel').textContent = 'Ce produit n\'est pas un pack.';
+    $('cpN').value = ''; $('cpRech').value = ''; $('cpRetirer').disabled = true;
+  };
+}
+// ============================================================
 //  CATALOGUE
 // ============================================================
 // Codes rapport présents : catégories connues + codes portés par des produits, dans l'ordre des codes
@@ -5225,6 +5388,12 @@ function guideHTML() {
   '<p>Le total de l\'année par motif est affiché dans l\'onglet <b>Inventaire</b>. Pour un produit périmé dont la date a été encodée, utilisez plutôt « Jeté » dans Dates de péremption.</p>' +
   '<p><b>Retirer un produit du catalogue</b> (plus vendu, fiche créée par erreur) : fiche → Infos produit → <b>Retirer du catalogue…</b>. S\'il reste du stock, il est d\'abord sorti (motif « Retiré du catalogue »). Le produit n\'apparaît plus dans le Catalogue, l\'Inventaire ni les comptages ; son historique est gardé.</p>' +
   '<p>Pour le remettre : Outils → <b>Produits retirés du catalogue</b> → Réactiver, ou scannez-le et touchez Réactiver dans sa fiche. Une facture d\'achat qui le contient le réactive automatiquement.</p></details>' +
+
+  '<details><summary>5 ter. Packs (Jupiler, Desperados) et déballage</summary>' +
+  '<p>Un pack vendu entier (Jupiler 6x33cl, Jupiler 6X50cl, Desperados 4x50cl) est un produit à part, compté en packs, comme dans Tokheim. Il est relié à sa canette : 6 ou 4 pièces.</p>' +
+  '<p><b>Plus de canettes seules en rayon ?</b> Fiche du pack (ou de la canette) → <b>Déballer des packs</b> → nombre de packs ouverts → <b>Déballer</b>. Les packs sont retirés et les canettes ajoutées, comme la conversion faite dans Tokheim. L\'opération apparaît dans l\'historique des deux produits ; <b>Annuler</b> sur l\'une des deux lignes annule tout le déballage. Si la canette n\'a pas encore de prix d\'achat, elle reçoit celui du pack ÷ nombre de canettes.</p>' +
+  '<p><b>Livraisons</b> : les packs de 6 (livrés par 4) vont sur le produit pack, les plateaux de 24 canettes sur la canette seule. Les Desperados Mojito se vendent toujours à la pièce : leurs packs sont convertis en canettes à l\'import.</p>' +
+  '<p><b>Autre pack</b> : fiche du pack → Infos produit → <b>Pack</b> : nombre de pièces et produit contenu → Enregistrer le pack.</p></details>' +
 
   '<details><summary>6. Dates de péremption</summary>' +
   '<p>Le suivi est actif pour l\'alimentation, les glaces, les boissons et les bières. Il se règle par catégorie (Outils → Catégories) ou par produit (fiche → Infos produit).</p>' +
