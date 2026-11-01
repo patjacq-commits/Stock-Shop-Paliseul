@@ -187,6 +187,10 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 .guide ul,.guide ol{padding-left:20px;margin:6px 0 10px}
 .guide .astuce{background:#eef3fa;border-radius:8px;padding:8px 10px;font-size:14px;margin:8px 0 10px}
 .guide-impr{display:none}
+.calc-colis{display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:13px;color:var(--gris);margin-top:6px}
+.calc-colis input{width:58px;padding:6px 6px;font-size:14px}
+.upcLigne{width:56px!important;padding:4px 6px!important;font-size:13px!important}
+.alerte-prix{color:#9a5a12;font-size:12.5px}
 .recherche-nom{position:relative}
 .recherche-nom .effacer{position:absolute;right:6px;top:50%;transform:translateY(-50%)}
 #sNomListe li.creer{background:#f3f6fa;cursor:pointer}
@@ -473,11 +477,16 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.6.1';
+const VERSION = 'v0.6.2';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.6.2', date: '01/11/2026', points: [
+    'Tout se compte à la pièce : à l\'import d\'une facture, les fardes et cartons sont convertis en pièces (« 3 × 10 = 30 pc », prix de la farde ÷ 10).',
+    'Aperçu de la facture : case « pièces par colis » modifiable sur chaque ligne, et alerte quand le prix semble être celui d\'une farde ou d\'un carton encodé comme une pièce.',
+    'Comptage (fiche et Inventaire rapide) : petit calcul « colis × pièces + pièces » (4 × 10 + 3 = 43).'
+  ] },
   { v: 'v0.6.1', date: '01/11/2026', points: [
     'Scanner → « Ou chercher par nom » : l\'appli propose les produits au fil de la frappe, sans tenir compte des majuscules ni des accents, mots dans n\'importe quel ordre, débuts de mots et petites fautes (« chokomel » trouve Chocomel).',
     'Produit introuvable : « + Créer le produit » avec le nom déjà rempli ; on peut y taper ou scanner son code-barres.',
@@ -1261,7 +1270,7 @@ async function ouvrirFiche(mode, p) {
     blocPrixSeul(p) +
     blocEntree(p) +
     (suiviPeremption(p) || lotsActifs.some(l => l.code === p.code) ? blocPeremption(p) : '') +
-    blocComptage() +
+    blocComptage(p) +
     blocSortie() +
     '<div class="bloc"><h3>Historique</h3><ul class="histo" id="hListe"><li class="aide">Chargement…</li></ul></div>' +
     '<details class="bloc"><summary>Infos produit (désignation, catégorie, prix de vente)</summary>' +
@@ -1283,6 +1292,7 @@ async function ouvrirFiche(mode, p) {
   ['eQte', 'ePu', 'eNbc', 'eUpc', 'ePc'].forEach(id => { $(id).oninput = majCalcul; });
   $('eAjouter').onclick = ajouterEntree;
   $('cpOk').onclick = corrigerStock;
+  brancherCalcColis('cc', 'cpQte');
   $('cpQte').onkeydown = e => { if (e.key === 'Enter') corrigerStock(); };
   $('hListe').onclick = e => {
     const b = e.target.closest('[data-annuler]');
@@ -1585,10 +1595,25 @@ function ajouterEntree() {
 // ============================================================
 //  COMPTAGE (corrige le stock)
 // ============================================================
-function blocComptage() {
+// Petit calcul « colis × pièces + pièces » qui remplit la quantité comptée
+function calcColis(px, upc) {
+  return '<div class="calc-colis">Calcul : <input type="text" id="' + px + 'Nb" inputmode="numeric" placeholder="colis"> × ' +
+    '<input type="text" id="' + px + 'Upc" inputmode="numeric" placeholder="pièces" value="' + esc(upc > 1 ? upc : '') + '"> + ' +
+    '<input type="text" id="' + px + 'Pc" inputmode="numeric" placeholder="pièces"></div>';
+}
+function brancherCalcColis(px, cible) {
+  if (!$(px + 'Nb')) return;
+  const maj = () => {
+    const nb = lireNombre($(px + 'Nb').value) || 0, upc = lireNombre($(px + 'Upc').value) || 0, pc = lireNombre($(px + 'Pc').value) || 0;
+    if (nb || pc) $(cible).value = String(arrondi(nb * upc + pc, 3)).replace('.', ',');
+  };
+  [px + 'Nb', px + 'Upc', px + 'Pc'].forEach(id => { $(id).oninput = maj; });
+}
+function blocComptage(p) {
   return '<div class="bloc"><h3>Comptage</h3>' +
-    '<div class="ligne"><input type="text" id="cpQte" inputmode="decimal" autocomplete="off" placeholder="Quantité comptée">' +
+    '<div class="ligne"><input type="text" id="cpQte" inputmode="decimal" autocomplete="off" placeholder="Quantité comptée (pièces)">' +
     '<button class="btn second" id="cpOk">Corriger le stock</button></div>' +
+    calcColis('cc', p && p.uniteParCarton) +
     '<p class="aide">Remplace le stock affiché par ce que vous comptez réellement (rayon + réserve).</p></div>';
 }
 
@@ -2050,6 +2075,8 @@ $('mvAnnuler').addEventListener('click', () => { annulerMv(); toast('Import annu
 $('mvConfirmer').addEventListener('click', async () => {
   if (!mvEnAttente) return;
   if (!mvEnAttente.controleOk && !confirm('Les totaux ne correspondent pas au document. Importer quand même ?')) return;
+  const nbAlertes = mvEnAttente.genre === 'facture' ? mvEnAttente.lignes.filter(x => x.alerte && !x.erreur).length : 0;
+  if (nbAlertes && !confirm(nbAlertes + ' ligne(s) ont un prix inhabituel (farde ou carton compté comme une pièce ?).\n\nImporter quand même ?')) return;
   if (sessionComptage && !confirm('Un inventaire rapide est en cours (' + libelleSession(sessionComptage) + ').\n\nImporter maintenant peut fausser le comptage : les quantités déjà comptées ne tiennent pas compte de cet import. Il vaut mieux clôturer le comptage d\'abord.\n\nImporter quand même ?')) return;
   const btn = $('mvConfirmer');
   btn.disabled = true; btn.textContent = 'Import en cours…';
@@ -2097,7 +2124,16 @@ async function analyserFacture(lignes) {
 
   const plan = { genre: 'facture', id, fournisseur, numero, date: achats[0].date || '', lignes: [], controles: [] };
   achats.forEach(l => {
-    const q = lireNombreImport(l.quantite), pu = lireNombreImport(l.prixunitaireht);
+    // Tout est compté à la pièce : « colis » × « unites_par_colis » (farde, carton…) donne la quantité en pièces
+    let q = lireNombreImport(l.quantite), pu = lireNombreImport(l.prixunitaireht);
+    const colis = lireNombreImport(l.colis), upcF = lireNombreImport(l.unitesparcolis), prixColis = lireNombreImport(l.prixcolisht);
+    let nb = q, upc = 1, prixBase = pu;
+    if (colis > 0 && upcF > 0) {
+      nb = colis; upc = upcF;
+      prixBase = prixColis != null ? prixColis : (pu != null ? arrondi(pu * upcF, 4) : null);
+      q = arrondi(colis * upcF, 3);
+      pu = prixBase != null ? arrondi(prixBase / upcF, 4) : null;
+    }
     let montant = lireNombreImport(l.montantht);
     if (montant == null && q != null && pu != null) montant = arrondi(q * pu, 2);
     let code = null, nouveau = false, raison = '';
@@ -2116,7 +2152,7 @@ async function analyserFacture(lignes) {
       ligne: l._ligne, ref: l.ref || '', code, nouveau, raison,
       description: (code && catalogue.get(code) ? catalogue.get(code).description : l.description).slice(0, 40),
       descriptionFacture: l.description, codeRapport: (code && catalogue.get(code) ? catalogue.get(code).codeRapport : l.coderapport) || '0000',
-      tvaPct: lireNombreImport(l.tvapct), quantite: q, pu, montant, per,
+      tvaPct: lireNombreImport(l.tvapct), quantite: q, pu, montant, per, nb, upc, prixBase,
       prixVente: lireNombreImport(l.prixventettc), remarque: l.remarque || '',
       erreur: !q || q <= 0 ? 'quantité manquante' : (pu == null ? 'prix manquant' : '')
     });
@@ -2129,6 +2165,7 @@ async function analyserFacture(lignes) {
   plan.lignes.forEach(x => {
     if (x.quantite && x.pu != null && Math.abs(x.quantite * x.pu - x.montant) > 0.05) plan.controles.push(ligneControle('Ligne ' + x.ligne + ' ' + x.description + ' (quantité × prix)', x.montant, arrondi(x.quantite * x.pu, 2)));
   });
+  plan.lignes.forEach(x => { x.alerte = alertePrixLigne(x); });
   plan.controleOk = plan.controles.every(c => c.ok) && plan.lignes.every(x => !x.erreur);
   plan.total = somme;
   return plan;
@@ -2151,10 +2188,15 @@ function afficherApercuMv() {
             (catalogue.get(x.code) && catalogue.get(x.code).archive ? ' <span class="badge orange">retiré → réactivé</span>' : '')) +
         (x.prixVente != null ? '<br><span class="aide">prix de vente → ' + euro(x.prixVente) + '</span>' : '') +
         (x.remarque ? '<br><span class="aide">⚠️ ' + esc(x.remarque) + '</span>' : '') +
-        (x.erreur ? '<br><span class="sansprix">' + esc(x.erreur) + '</span>' : '') + '</td>' +
-        '<td class="n">' + fmtQte(x.quantite) + '</td><td class="n">' + fmtPU(x.pu) + '</td><td>' + (x.per ? dateLot(x.per) : '—') + '</td></tr>').join('') +
+        (x.erreur ? '<br><span class="sansprix">' + esc(x.erreur) + '</span>' : '') +
+        '<br><span class="aide">Pièces par colis : <input type="text" class="upcLigne" inputmode="numeric" data-i="' + i + '" value="' + esc(x.upc || 1) + '"></span>' +
+        '<br><span class="alerte-prix" id="mvW' + i + '">' + (x.alerte ? '⚠️ ' + esc(x.alerte) : '') + '</span></td>' +
+        '<td class="n" id="mvQ' + i + '">' + qteLigneFacture(x) + '</td><td class="n" id="mvP' + i + '">' + fmtPU(x.pu) + '</td><td>' + (x.per ? dateLot(x.per) : '—') + '</td></tr>').join('') +
       '</tbody></table></div>';
-    h += '<p class="aide">Pour un produit nouveau, scannez ou tapez son code-barres s\'il en a un : sinon un numéro interne lui est attribué.</p>';
+    h += '<p class="aide">Pour un produit nouveau, scannez ou tapez son code-barres s\'il en a un : sinon un numéro interne lui est attribué. ' +
+      'Tout est compté à la pièce : si une ligne est en fardes ou en cartons, mettez le nombre de pièces par colis (la quantité est multipliée, le prix divisé).</p>';
+    const nbAl = p.lignes.filter(x => x.alerte).length;
+    if (nbAl) h += '<div class="alerte">⚠️ ' + nbAl + ' ligne(s) avec un prix inhabituel : vérifiez les pièces par colis.</div>';
   } else {
     h += '<div class="apercu"><b>' + p.shifts.length + ' shift(s)</b> · ' + p.ventes.length + ' vente(s) déduite(s) du stock · ' +
       p.ignorees + ' ligne(s) ignorée(s) (codes non suivis) · ' + p.inconnues.length + ' PLU inconnu(s)</div>';
@@ -2169,6 +2211,7 @@ function afficherApercuMv() {
   if (sessionComptage) h += '<div class="alerte">⚠️ Un inventaire rapide est en cours (' + esc(libelleSession(sessionComptage)) + ') : clôturez-le avant d\'importer.</div>';
   h += '<div class="' + (p.controleOk ? 'resultat ok' : 'alerte') + '">' + (p.controleOk ? '✅ Tout concorde : vous pouvez confirmer.' : '⚠️ Vérifiez les écarts ci-dessus avant de confirmer.') + ' Rien n\'est encore enregistré.</div>';
   $('mvApercu').innerHTML = h;
+  document.querySelectorAll('.upcLigne').forEach(inp => inp.oninput = () => changerUpcLigne(p, Number(inp.dataset.i), inp.value));
   document.querySelectorAll('.cbNouveau').forEach(inp => inp.oninput = () => {
     const info = document.querySelector('.cbInfo[data-i="' + inp.dataset.i + '"]');
     const v = inp.value.trim(), n = normaliserCode(v);
@@ -2177,6 +2220,34 @@ function afficherApercuMv() {
     else { const ex = trouverCode(n.code); info.textContent = ex ? '→ existe déjà : ' + catalogue.get(ex).description + ' (pas de nouveau produit)' : 'Code ' + n.code; }
   });
   $('mvValidation').classList.remove('cache');
+}
+
+// Quantité affichée dans l'aperçu : « 3 × 10 = 30 pc »
+function qteLigneFacture(x) {
+  return x.upc > 1 ? fmtQte(x.nb) + ' × ' + fmtQte(x.upc) + '<br><b>= ' + fmtQte(x.quantite) + ' pc</b>' : fmtQte(x.quantite);
+}
+// Prix à la pièce très différent du dernier prix d'achat : colis encodé comme une pièce, ou l'inverse ?
+function alertePrixLigne(x) {
+  const p = x.code && catalogue.get(x.code);
+  const ref = p && p.dernierPrixHT;
+  if (!(ref > 0) || !(x.pu > 0)) return '';
+  const r = x.pu / ref;
+  if (r >= 2.5) return 'Prix à la pièce ' + fmtPU(x.pu) + ', soit ' + Math.round(r) + '× le dernier prix (' + fmtPU(ref) + ') : farde ou carton compté comme une pièce ?' +
+    (p.uniteParCarton > 1 && x.upc === 1 ? ' D\'habitude ' + fmtQte(p.uniteParCarton) + ' pièces par colis.' : '');
+  if (r <= 0.4) return 'Prix à la pièce ' + fmtPU(x.pu) + ', bien plus bas que le dernier (' + fmtPU(ref) + ') : vérifiez les pièces par colis.';
+  return '';
+}
+function changerUpcLigne(p, i, valeur) {
+  const x = p.lignes[i];
+  const upc = lireNombre(valeur);
+  x.upc = upc > 0 ? upc : 1;
+  x.quantite = arrondi((x.nb || 0) * x.upc, 3);
+  x.pu = x.prixBase != null ? arrondi(x.prixBase / x.upc, 4) : null;
+  x.erreur = !x.quantite || x.quantite <= 0 ? 'quantité manquante' : (x.pu == null ? 'prix manquant' : '');
+  x.alerte = alertePrixLigne(x);
+  $('mvQ' + i).innerHTML = qteLigneFacture(x);
+  $('mvP' + i).textContent = fmtPU(x.pu);
+  $('mvW' + i).textContent = x.alerte ? '⚠️ ' + x.alerte : '';
 }
 
 async function executerFacture(p) {
@@ -2200,7 +2271,7 @@ async function executerFacture(p) {
     const donnees = {
       description: x.description, codeRapport: x.codeRapport,
       tvaPct: x.tvaPct != null ? x.tvaPct : (CATEGORIES[x.codeRapport] ? CATEGORIES[x.codeRapport].tva : 6),
-      prixVenteTTC: x.prixVente != null ? x.prixVente : null, consigne: null
+      prixVenteTTC: x.prixVente != null ? x.prixVente : null, consigne: null, uniteParCarton: x.upc > 1 ? x.upc : null
     };
     const r = x.code ? await creerProduit(x.code, donnees) : await creerProduitInterne(donnees);
     x.code = r.code;
@@ -2220,11 +2291,13 @@ async function executerFacture(p) {
     lot.set(db.collection('mouvements').doc(), {
       type: 'entree', code: x.code, description: prod.description || x.description,
       quantite: x.quantite, prixUnitaireHT: x.pu, totalHT: x.montant, modeSaisie: 'facture',
+      cartons: x.upc > 1 ? x.nb : null, uniteParCarton: x.upc > 1 ? x.upc : null,
       fournisseur: p.fournisseur, facture: p.numero, refFournisseur: x.ref || null,
       importFacture: p.id, lotPeremption: refLot ? refLot.id : null,
       par: utilisateur, le: maintenant, jour: jourLocal(), annulee: false
     });
     const maj = { stock: FV.increment(x.quantite), dernierPrixHT: x.pu, dernierAchatLe: maintenant, dernierFournisseur: p.fournisseur };
+    if (x.upc > 1) maj.uniteParCarton = x.upc;
     if (x.prixVente != null) { maj.prixVenteTTC = x.prixVente; maj.modifiePar = utilisateur; maj.modifieLe = maintenant; }
     if (prod.archive) { maj.archive = false; maj.reactivePar = utilisateur; maj.reactiveLe = maintenant; }   // racheté : il revient au catalogue
     lot.update(db.collection('produits').doc(x.code), maj);
@@ -3022,11 +3095,13 @@ function afficherProduitComptage(p) {
     (p.archive ? '<div class="alerte">Ce produit est retiré du catalogue.</div>' : '') +
     (hors ? '<div class="alerte">Hors de ce comptage (' + esc(libCategorie(cr)) + ') : il sera quand même compté.</div>' : '') +
     (ligne ? '<div style="margin-top:6px">Déjà compté : <b>' + fmtQte(ligne.quantite) + '</b> <span class="aide">(' + esc(ligne.majPar || '') + ')</span></div>' : '') +
-    '<label for="icQte">Quantité comptée</label><input type="text" id="icQte" inputmode="decimal" autocomplete="off">' +
+    '<label for="icQte">Quantité comptée (pièces)</label><input type="text" id="icQte" inputmode="decimal" autocomplete="off">' +
+    calcColis('ix', p.uniteParCarton) +
     (ligne
       ? '<div class="deux" style="margin-top:8px"><button class="btn" id="icAjouter">Ajouter (+)</button><button class="btn second" id="icRemplacer">Remplacer</button></div>'
       : '<button class="btn plein" id="icValider" style="margin-top:8px">Valider</button>') +
     '<button class="lien" id="icPasser">Passer</button></div>';
+  brancherCalcColis('ix', 'icQte');
   const go = mode => enregistrerLigne(p, lireNombre($('icQte').value), mode);
   if (ligne) { $('icAjouter').onclick = () => go('ajouter'); $('icRemplacer').onclick = () => go('remplacer'); }
   else $('icValider').onclick = () => go('remplacer');
@@ -5125,7 +5200,7 @@ function guideHTML() {
   '<details><summary>4. Encoder une livraison (entrée)</summary>' +
   '<ol><li>Scannez le produit (ou ouvrez-le depuis le Catalogue).</li>' +
   '<li>Fournisseur et n° de facture : ils restent remplis toute la journée, pratique pour une facture entière.</li>' +
-  '<li><b>À l\'unité</b> : quantité + prix unitaire HT. <b>Par carton</b> : nombre de cartons, unités par carton, prix HT du carton. L\'appli calcule le prix unitaire.</li>' +
+  '<li><b>À l\'unité</b> : quantité + prix unitaire HT. <b>Par carton</b> (farde, carton, pack) : nombre de colis, pièces par colis (5, 6, 8, 10… selon la livraison), prix HT du colis. L\'appli ajoute les pièces au stock et calcule le prix à la pièce. Elle retient la dernière taille de colis.</li>' +
   '<li>Vérifiez le total HT affiché avec la facture, puis <b>Ajouter l\'entrée</b>.</li></ol>' +
   '<p>L\'appli demande confirmation si le produit a déjà été encodé aujourd\'hui, ou si le prix s\'écarte de plus de 50 % du précédent (faute de frappe ?).</p>' +
   '<div class="astuce">Hors ligne (réserve, chambre froide), l\'entrée est gardée dans le téléphone et envoyée dès le retour du réseau.</div></details>' +
@@ -5135,6 +5210,7 @@ function guideHTML() {
   '<p>Pour en faire beaucoup à la suite : onglet Inventaire → <b>Encoder les prix d\'achat manquants</b> (rubrique 9).</p></details>' +
 
   '<details><summary>5. Compter et corriger le stock</summary>' +
+  '<p><b>Tout se compte à la pièce</b> (paquet, canette, barre…), comme à la caisse. Pour des fardes ou cartons fermés, la ligne <b>Calcul</b> fait l\'opération : colis × pièces par colis + pièces en vrac (4 × 10 + 3 = 43) et remplit la quantité.</p>' +
   '<p><b>Un seul produit</b> : dans sa fiche, partie <b>Comptage</b>, tapez la quantité réellement présente (rayon + réserve) puis <b>Corriger le stock</b>. L\'écart est enregistré dans l\'historique.</p>' +
   '<p><b>Inventaire rapide</b> (tout le shop ou un code rapport) : onglet <b>Inventaire</b> → carte « Inventaire rapide ».</p>' +
   '<ol><li>Choisissez quoi compter (« Tout le shop » ou un code rapport) → <b>Commencer un comptage</b>.</li>' +
@@ -5212,6 +5288,7 @@ function guideHTML() {
   '<li>Pour un produit <span class="badge orange">nouveau</span>, scannez ou tapez son code-barres dans la case. Sinon, un numéro interne lui est attribué.</li>' +
   '<li><b>Confirmer l\'import</b> : le stock, le prix d\'achat, le fournisseur, les dates de péremption et les prix de vente sont mis à jour.</li></ol>' +
   '<p>L\'appli retient la correspondance « référence du fournisseur → produit » pour les factures suivantes.</p>' +
+  '<p><b>Fardes et cartons</b> : tout est converti en pièces. Une ligne « 3 fardes de 10 à 75,00 € » devient <b>3 × 10 = 30 pc</b> à 7,50 € la pièce. Chaque ligne de l\'aperçu a une case <b>Pièces par colis</b> : si une farde a été comptée comme une seule pièce, tapez le nombre de paquets (la quantité est multipliée et le prix divisé ; le total ne change pas). L\'appli signale ⚠️ un prix à la pièce très différent du dernier prix d\'achat (par ex. 10 fois plus cher : farde comptée comme un paquet).</p>' +
   '<p><b>Ventes de shift</b> : même principe, chaque vente diminue le stock. Les lignes de carburant, de loterie, de cautions et le café sont ignorées ; la liste se règle dans Outils → « Ventes de shift : lignes ignorées ». Les totaux par code rapport sont contrôlés.</p>' +
   '<p><b>Après chaque import</b>, l\'appli demande quoi en faire :</p><ul>' +
   '<li><b>Conserver dans l\'historique</b> : l\'import est classé par année et par mois (selon la date du document). Il ne peut plus être supprimé, seulement annulé.</li>' +
