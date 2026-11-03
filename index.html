@@ -213,7 +213,7 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 .fenetre-date{background:#fff;width:100%;max-width:560px;max-height:94vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:16px}
 .zone-date{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3}
 .zone-date video{width:100%;height:100%;object-fit:cover;display:block}
-.viseur-date{position:absolute;left:10%;right:10%;top:38%;height:24%;border:2px solid #ffd54f;border-radius:8px;box-shadow:0 0 0 999px rgba(0,0,0,.35)}
+.viseur-date{position:absolute;left:5%;right:5%;top:12%;height:76%;border:2px solid #ffd54f;border-radius:8px;box-shadow:0 0 0 999px rgba(0,0,0,.35)}
 .nouv h3{font-size:15px;margin:14px 0 4px}
 .nouv ul{padding-left:20px;margin:4px 0}
 .nouv li{margin:4px 0}
@@ -512,11 +512,16 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.7.0';
+const VERSION = 'v0.7.1';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.7.1', date: '03/11/2026', points: [
+    'Scan plus rapide : la caméra ne cherche que les codes-barres produit (EAN/UPC) pendant le scan courant ; les codes GS1 des cartons ne sont cherchés que là où ils servent (facture, relevé des dates).',
+    'Caméra ouverte en meilleure résolution, avec mise au point continue quand le téléphone le permet.',
+    'Lecture de la date par caméra (essai) : zone de lecture agrandie (presque toute l\'image) au lieu d\'une bande étroite, et réglage de lecture plus adapté à une date isolée.'
+  ] },
   { v: 'v0.7.0', date: '01/11/2026', points: [
     'Nouvel onglet Stats : ventes, marge et bénéfice brut du shop par mois, par année ou entre deux dates ; détail par code rapport ; meilleures ventes ; produits sans vente.',
     'Bénéfice brut par mois : marge sur ventes + gain café + commission loterie − sorties (périmés, casse…).',
@@ -1031,7 +1036,7 @@ async function demarrerCamera() {
   }
   try {
     detecteur = await creerDetecteur();
-    flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    flux = await ouvrirFluxCamera(1280);
     const v = $('video');
     v.srcObject = flux;
     await v.play();
@@ -3143,7 +3148,7 @@ async function demarrerCamComptage() {
   if (!('BarcodeDetector' in window)) { toast('Caméra indisponible sur cet appareil : utilisez la saisie ou une douchette.', 'warn'); return; }
   try {
     const det = await creerDetecteur();
-    const flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    const flux = await ouvrirFluxCamera(1280);
     const v = $('icVideo');
     if (!v) { flux.getTracks().forEach(t => t.stop()); return; }
     v.srcObject = flux;
@@ -3633,13 +3638,27 @@ function lignesAffichees(inclureZero) {
 const FORMATS_PRODUIT = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
 const FORMATS_GS1 = ['code_128', 'data_matrix', 'qr_code'];
 let formatsDispo = null;
-async function creerDetecteur() {
+async function creerDetecteur(complet) {
   if (!('BarcodeDetector' in window)) return null;
   if (!formatsDispo) {
     try { formatsDispo = await BarcodeDetector.getSupportedFormats(); } catch (e) { formatsDispo = FORMATS_PRODUIT; }
   }
-  const f = FORMATS_PRODUIT.concat(FORMATS_GS1).filter(x => formatsDispo.includes(x));
+  // Scan courant (produit) : seulement EAN/UPC, plus rapide sur la plupart des téléphones.
+  // Les formats GS1 (cartons : Code128, DataMatrix, QR) ne sont demandés que là où ils servent (complet=true).
+  const voulus = complet ? FORMATS_PRODUIT.concat(FORMATS_GS1) : FORMATS_PRODUIT;
+  const f = voulus.filter(x => formatsDispo.includes(x));
   return new BarcodeDetector({ formats: f.length ? f : FORMATS_PRODUIT });
+}
+// Ouvre la caméra en résolution confortable pour décoder un code-barres ou lire une date,
+// et active la mise au point continue quand l'appareil le permet (sans effet sinon).
+async function ouvrirFluxCamera(largeurIdeale) {
+  const flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: largeurIdeale } }, audio: false });
+  try {
+    const piste = flux.getVideoTracks()[0];
+    const cap = piste.getCapabilities && piste.getCapabilities();
+    if (cap && cap.focusMode && cap.focusMode.includes('continuous')) await piste.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+  } catch (e) { /* réglage non supporté sur cet appareil : sans conséquence */ }
+  return flux;
 }
 // Parmi les codes visibles, celui dont le centre est le plus proche du centre du cadre de visée
 function codeCentral(codes, video) {
@@ -3781,7 +3800,7 @@ function chargerOCR() {
     const go = async () => {
       try {
         const w = await Tesseract.createWorker('eng', 1);
-        await w.setParameters({ tessedit_char_whitelist: '0123456789/-.: ', tessedit_pageseg_mode: '6' });
+        await w.setParameters({ tessedit_char_whitelist: '0123456789/-.: ', tessedit_pageseg_mode: '11' });
         ocrWorker = w;
         ok(w);
       } catch (e) { ocrChargement = null; ko(e); }
@@ -3846,7 +3865,7 @@ async function ouvrirLectureDate(retour) {
   };
   lecDate = { votes: new Map(), retour };
   try {
-    const flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } }, audio: false });
+    const flux = await ouvrirFluxCamera(1920);
     if (!lecDate) { flux.getTracks().forEach(t => t.stop()); return; }
     lecDate.flux = flux;
     const v = $('ldVideo');
@@ -3858,7 +3877,7 @@ async function ouvrirLectureDate(retour) {
     return;
   }
   // Codes GS1 avec date (cartons) : lecture immédiate et sûre
-  creerDetecteur().then(det => {
+  creerDetecteur(true).then(det => {
     if (!det || !lecDate) return;
     lecDate.det = det;
     lecDate.boucleCode = setInterval(async () => {
@@ -3897,8 +3916,8 @@ async function ouvrirLectureDate(retour) {
     lecDate.occupeTexte = true;
     try {
       // Bande centrale de l'image (le cadre), agrandie, en niveaux de gris contrastés
-      const sx = v.videoWidth * 0.1, sw = v.videoWidth * 0.8, sy = v.videoHeight * 0.38, sh = v.videoHeight * 0.24;
-      const lw = 1000, lh = Math.round(lw * sh / sw);
+      const sx = v.videoWidth * 0.05, sw = v.videoWidth * 0.9, sy = v.videoHeight * 0.12, sh = v.videoHeight * 0.76;
+      const lw = 1400, lh = Math.round(lw * sh / sw);
       canvas.width = lw; canvas.height = lh;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(v, sx, sy, sw, sh, 0, 0, lw, lh);
@@ -3963,10 +3982,10 @@ function ouvrirReleveDates() {
   $('rvSaisie').focus();
 }
 async function demarrerCamReleve() {
-  const det = await creerDetecteur();
+  const det = await creerDetecteur(true);
   if (!det) { toast('Caméra indisponible sur cet appareil : utilisez la saisie ou une douchette.', 'warn'); return; }
   try {
-    const flux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    const flux = await ouvrirFluxCamera(1280);
     const v = $('rvVideo');
     if (!v) { flux.getTracks().forEach(t => t.stop()); return; }
     v.srcObject = flux; await v.play();
