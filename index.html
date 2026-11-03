@@ -512,11 +512,14 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.7.1';
+const VERSION = 'v0.7.2';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.7.2', date: '03/11/2026', points: [
+    'Encoder une livraison (entrée) : case « Je ne connais pas le prix d\'achat » pour ajouter la quantité au stock sans prix. Le produit passe (ou reste) dans « Prix d\'achat manquants », à compléter quand vous voulez.'
+  ] },
   { v: 'v0.7.1', date: '03/11/2026', points: [
     'Scan plus rapide : la caméra ne cherche que les codes-barres produit (EAN/UPC) pendant le scan courant ; les codes GS1 des cartons ne sont cherchés que là où ils servent (facture, relevé des dates).',
     'Caméra ouverte en meilleure résolution, avec mise au point continue quand le téléphone le permet.',
@@ -1358,6 +1361,7 @@ async function ouvrirFiche(mode, p) {
     b.onclick = () => changerModeSaisie(b.dataset.mode);
   });
   ['eQte', 'ePu', 'eNbc', 'eUpc', 'ePc'].forEach(id => { $(id).oninput = majCalcul; });
+  $('eSansPrix').onchange = basculerSansPrix;
   $('eAjouter').onclick = ajouterEntree;
   $('cpOk').onclick = corrigerStock;
   brancherCalcColis('cc', 'cpQte');
@@ -1572,6 +1576,7 @@ function blocEntree(p) {
       '<div><label for="eUpc">Unités / carton</label><input type="text" id="eUpc" inputmode="numeric" autocomplete="off" value="' + nombreChamp(p.uniteParCarton) + '"></div>' +
       '<div><label for="ePc">Prix carton HT</label><input type="text" id="ePc" inputmode="decimal" autocomplete="off" value="' + nombreChamp(pc) + '"></div>' +
     '</div>' +
+    '<label class="coche" style="margin-top:6px"><input type="checkbox" id="eSansPrix"> Je ne connais pas le prix d\'achat (à encoder plus tard)</label>' +
     '<div class="calcul" id="eCalcul"></div>' +
     (suiviPeremption(p) ? champsDate('e', false) : '') +
     '<button class="btn plein" id="eAjouter" style="margin-top:10px">Ajouter l\'entrée</button>' +
@@ -1587,26 +1592,33 @@ function changerModeSaisie(mode) {
   (mode === 'carton' ? $('eNbc') : $('eQte')).focus();
 }
 
+// Case « je ne connais pas le prix » : désactive le champ prix du mode courant et vide son contenu
+function basculerSansPrix() {
+  const sans = $('eSansPrix') && $('eSansPrix').checked;
+  ['ePu', 'ePc'].forEach(id => { if ($(id)) { $(id).disabled = sans; if (sans) $(id).value = ''; } });
+  majCalcul();
+}
 function calculEntree() {
+  const sansPrix = $('eSansPrix') && $('eSansPrix').checked;
   if (ficheCourante.modeSaisie === 'carton') {
-    const nb = lireNombre($('eNbc').value), upc = lireNombre($('eUpc').value), pc = lireNombre($('ePc').value);
+    const nb = lireNombre($('eNbc').value), upc = lireNombre($('eUpc').value), pc = sansPrix ? null : lireNombre($('ePc').value);
     if (!nb || nb <= 0) return { ok: false, msg: 'Indiquez le nombre de cartons.' };
     if (!upc || upc <= 0) return { ok: false, msg: 'Indiquez le nombre d\'unités par carton.' };
-    if (pc == null || pc < 0) return { ok: false, msg: 'Indiquez le prix HT du carton.' };
-    return { ok: true, mode: 'carton', qte: arrondi(nb * upc, 3), pu: arrondi(pc / upc, 4), total: arrondi(nb * pc, 2), cartons: nb, upc, pc };
+    if (!sansPrix && (pc == null || pc < 0)) return { ok: false, msg: 'Indiquez le prix HT du carton (ou cochez « je ne connais pas le prix »).' };
+    return { ok: true, mode: 'carton', qte: arrondi(nb * upc, 3), pu: sansPrix ? null : arrondi(pc / upc, 4), total: sansPrix ? null : arrondi(nb * pc, 2), cartons: nb, upc, pc: sansPrix ? null : pc };
   }
-  const qte = lireNombre($('eQte').value), pu = lireNombre($('ePu').value);
+  const qte = lireNombre($('eQte').value), pu = sansPrix ? null : lireNombre($('ePu').value);
   if (!qte || qte <= 0) return { ok: false, msg: 'Indiquez la quantité.' };
-  if (pu == null || pu < 0) return { ok: false, msg: 'Indiquez le prix unitaire HT.' };
-  return { ok: true, mode: 'unite', qte, pu: arrondi(pu, 4), total: arrondi(qte * pu, 2) };
+  if (!sansPrix && (pu == null || pu < 0)) return { ok: false, msg: 'Indiquez le prix unitaire HT (ou cochez « je ne connais pas le prix »).' };
+  return { ok: true, mode: 'unite', qte, pu: sansPrix ? null : arrondi(pu, 4), total: sansPrix ? null : arrondi(qte * pu, 2) };
 }
 
 function majCalcul() {
   if (!$('eCalcul')) return;
   const c = calculEntree();
-  $('eCalcul').innerHTML = c.ok
-    ? '= <b>' + fmtQte(c.qte) + ' unité(s)</b> × ' + fmtPU(c.pu) + ' HT = <b>' + euro(c.total) + ' HT</b>'
-    : '';
+  $('eCalcul').innerHTML = !c.ok ? ''
+    : c.pu == null ? '= <b>' + fmtQte(c.qte) + ' unité(s)</b>, prix à encoder plus tard'
+    : '= <b>' + fmtQte(c.qte) + ' unité(s)</b> × ' + fmtPU(c.pu) + ' HT = <b>' + euro(c.total) + ' HT</b>';
 }
 
 function ajouterEntree() {
@@ -1621,7 +1633,7 @@ function ajouterEntree() {
   if (datePer && joursRestants(datePer.peremption) < 0 && !confirm('La date de péremption ' + dateLot(datePer) + ' est déjà dépassée. Continuer ?')) return;
 
   // Faute de frappe probable sur le prix ?
-  if (p.dernierPrixHT > 0 && Math.abs(c.pu - p.dernierPrixHT) / p.dernierPrixHT > ECART_PRIX_MAX) {
+  if (c.pu != null && p.dernierPrixHT > 0 && Math.abs(c.pu - p.dernierPrixHT) / p.dernierPrixHT > ECART_PRIX_MAX) {
     if (!confirm('Prix inhabituel : ' + fmtPU(c.pu) + ' HT l\'unité, contre ' + fmtPU(p.dernierPrixHT) + ' la dernière fois.\n\nConfirmer ce prix ?')) return;
   }
   // Déjà encodé aujourd'hui (par soi-même ou par l'autre téléphone) ?
@@ -1649,7 +1661,8 @@ function ajouterEntree() {
     fournisseur: fourn || null, facture: fact || null,
     par: utilisateur, le: maintenant, jour: auj, annulee: false
   });
-  const maj = { stock: FV.increment(c.qte), dernierPrixHT: c.pu, dernierAchatLe: maintenant };
+  const maj = { stock: FV.increment(c.qte), dernierAchatLe: maintenant };
+  if (c.pu != null) maj.dernierPrixHT = c.pu;   // prix inconnu : on ne touche pas au dernier prix connu
   if (fourn) maj.dernierFournisseur = fourn;
   if (c.mode === 'carton') maj.uniteParCarton = c.upc;
   lot.update(db.collection('produits').doc(code), maj);
@@ -1657,7 +1670,7 @@ function ajouterEntree() {
   lot.commit().catch(e => toast('Entrée refusée : ' + (e.code || e.message), 'ko'));
 
   memoriserSaisie(fourn, fact);
-  toast('Entrée ajoutée : +' + fmtQte(c.qte) + ' ' + (p.description || ''));
+  toast('Entrée ajoutée : +' + fmtQte(c.qte) + ' ' + (p.description || '') + (c.pu == null ? ' (prix à encoder plus tard)' : ''));
   $('eQte').value = '';
   $('eNbc').value = '';
   if ($('eDate')) { $('eDate').value = ''; majTexteDate('e'); }
@@ -5812,6 +5825,7 @@ function guideHTML() {
   '<li>Fournisseur et n° de facture : ils restent remplis toute la journée, pratique pour une facture entière.</li>' +
   '<li><b>À l\'unité</b> : quantité + prix unitaire HT. <b>Par carton</b> (farde, carton, pack) : nombre de colis, pièces par colis (5, 6, 8, 10… selon la livraison), prix HT du colis. L\'appli ajoute les pièces au stock et calcule le prix à la pièce. Elle retient la dernière taille de colis.</li>' +
   '<li>Vérifiez le total HT affiché avec la facture, puis <b>Ajouter l\'entrée</b>.</li></ol>' +
+  '<p><b>Prix d\'achat inconnu pour le moment</b> (comptage de départ, facture pas encore reçue…) : cochez <b>Je ne connais pas le prix d\'achat</b>, seule la quantité est ajoutée au stock. Le produit passe (ou reste) dans « Prix d\'achat manquants » (rubrique 4 bis) ; un ancien prix déjà connu n\'est pas effacé.</p>' +
   '<p>L\'appli demande confirmation si le produit a déjà été encodé aujourd\'hui, ou si le prix s\'écarte de plus de 50 % du précédent (faute de frappe ?).</p>' +
   '<div class="astuce">Hors ligne (réserve, chambre froide), l\'entrée est gardée dans le téléphone et envoyée dès le retour du réseau.</div></details>' +
 
