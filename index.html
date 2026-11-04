@@ -512,11 +512,14 @@ pre.rapport{white-space:pre-wrap;font-size:13px;background:#f6f8fa;border-radius
 // ============================================================
 //  CONFIGURATION
 // ============================================================
-const VERSION = 'v0.7.2';
+const VERSION = 'v0.7.3';
 
 // Nouveautés affichées une fois après chaque mise à jour (la plus récente en premier).
 // À COMPLÉTER À CHAQUE VERSION, en même temps que le mode d'emploi (fonction guideHTML).
 const NOUVEAUTES = [
+  { v: 'v0.7.3', date: '04/11/2026', points: [
+    'Encoder une livraison (entrée) : « Annuler cette entrée » juste après l\'avoir ajoutée, sans devoir aller chercher la ligne dans l\'historique.'
+  ] },
   { v: 'v0.7.2', date: '03/11/2026', points: [
     'Encoder une livraison (entrée) : case « Je ne connais pas le prix d\'achat » pour ajouter la quantité au stock sans prix. Le produit passe (ou reste) dans « Prix d\'achat manquants », à compléter quand vous voulez.'
   ] },
@@ -1580,6 +1583,7 @@ function blocEntree(p) {
     '<div class="calcul" id="eCalcul"></div>' +
     (suiviPeremption(p) ? champsDate('e', false) : '') +
     '<button class="btn plein" id="eAjouter" style="margin-top:10px">Ajouter l\'entrée</button>' +
+    '<div class="aide" id="eDerniere"></div>' +
   '</div>';
 }
 
@@ -1654,7 +1658,8 @@ function ajouterEntree() {
     refLotPer = db.collection('lots').doc();
     lot.set(refLotPer, nouveauLot(code, p, datePer, c.qte, 'entree'));
   }
-  lot.set(db.collection('mouvements').doc(), {
+  const refMv = db.collection('mouvements').doc();
+  lot.set(refMv, {
     type: 'entree', code, description: p.description || '', lotPeremption: refLotPer ? refLotPer.id : null,
     quantite: c.qte, prixUnitaireHT: c.pu, totalHT: c.total,
     modeSaisie: c.mode, cartons: c.cartons || null, uniteParCarton: c.upc || null, prixCartonHT: c.pc != null ? c.pc : null,
@@ -1667,7 +1672,8 @@ function ajouterEntree() {
   if (c.mode === 'carton') maj.uniteParCarton = c.upc;
   lot.update(db.collection('produits').doc(code), maj);
   // Hors ligne, l'écriture est gardée dans le téléphone et envoyée au retour du réseau
-  lot.commit().catch(e => toast('Entrée refusée : ' + (e.code || e.message), 'ko'));
+  lot.commit().then(() => afficherAnnulationRapide(refMv.id, code, c, p))
+    .catch(e => toast('Entrée refusée : ' + (e.code || e.message), 'ko'));
 
   memoriserSaisie(fourn, fact);
   toast('Entrée ajoutée : +' + fmtQte(c.qte) + ' ' + (p.description || '') + (c.pu == null ? ' (prix à encoder plus tard)' : ''));
@@ -1675,6 +1681,14 @@ function ajouterEntree() {
   $('eNbc').value = '';
   if ($('eDate')) { $('eDate').value = ''; majTexteDate('e'); }
   majCalcul();
+}
+// Erreur toute fraîche (mauvaise quantité, mauvais produit…) : annuler sans aller chercher la ligne dans l'historique
+function afficherAnnulationRapide(id, code, c, p) {
+  if (!$('eDerniere') || !ficheCourante || ficheCourante.code !== code) return;
+  $('eDerniere').innerHTML = '✓ Dernière entrée : +' + fmtQte(c.qte) + ' ' + esc(p.description || '') +
+    ' <button class="lien" id="eAnnulerDerniere">Annuler cette entrée</button>';
+  const b = $('eAnnulerDerniere');
+  if (b) b.onclick = () => { annulerMouvement(id); if ($('eDerniere')) $('eDerniere').innerHTML = ''; };
 }
 
 // ============================================================
